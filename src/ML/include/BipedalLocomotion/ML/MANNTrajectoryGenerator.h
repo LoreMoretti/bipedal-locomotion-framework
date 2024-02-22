@@ -23,6 +23,18 @@ namespace ML
 {
 
 /**
+ * Frame representations for the trajectory planner.
+ * The frame representation is related to positions (R3) and orientations (SO3).
+ * For velocities and wrenches (R6) the representation is always MIXED
+ * (https://github.com/traversaro/traversaro-phd-thesis/releases/tag/v1.0.0).
+ */
+enum MANNFrameRepresentation
+{
+    INERTIAL = 0, /**< inertial representation */
+    LOCAL = 1, /**< A fixed frame attached to a robot frame at a certain time instant */
+};
+
+/**
  * Input of the planner.
  */
 struct MANNTrajectoryGeneratorInput : public MANNAutoregressiveInput
@@ -48,8 +60,14 @@ struct MANNTrajectoryGeneratorOutput
     std::vector<std::chrono::nanoseconds> timestamps; /**< Vector containing the time stamps. */
 
     Contacts::ContactPhaseList phaseList; /**< List of the contact phases */
+
+    MANNFrameRepresentation frameRepresentation = INERTIAL; /**< Frame representation of the
+                                                               trajectory. */
+
+    std::string referenceFrame; /**< Reference frame of the trajectory. */
 };
 
+// clang-format off
 /**
  * MANNTrajectoryGenerator is a class that uses MANNAutoregressive to generate a kinematically
  * feasible trajectory for humanoid robots. The planner will generate a trajectory which duration is
@@ -77,6 +95,8 @@ struct MANNTrajectoryGeneratorOutput
  * in IEEE Robotics and Automation Letters, vol. 7, no. 2, pp. 2779-2786, April 2022,
  * doi: 10.1109/LRA.2022.3141658." https://doi.org/10.1109/LRA.2022.3141658
  */
+
+// clang-format on
 class MANNTrajectoryGenerator
     : public System::Advanceable<MANNTrajectoryGeneratorInput, MANNTrajectoryGeneratorOutput>
 {
@@ -165,6 +185,17 @@ public:
      */
     bool setInitialState(Eigen::Ref<const Eigen::VectorXd> jointPositions, //
                          const manif::SE3d& basePose);
+    /**
+     * Set the frame representation for the generated trajectory.
+     * @param jointPositions position of the joints.
+     */
+    bool setFrameRepresentation(const MANNFrameRepresentation frameRepresentation);
+
+    /**
+     * Set the reference frame for the generated trajectory.
+     * @param jointPositions position of the joints.
+     */
+    bool setReferenceFrame(const std::string& referenceFrame);
 
 private:
     struct Impl;

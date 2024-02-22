@@ -5,17 +5,26 @@
  * distributed under the terms of the BSD-3-Clause license.
  */
 
+#include "BipedalLocomotion/Contacts/ContactPhaseList.h"
+#include "BipedalLocomotion/Conversions/CasadiConversions.h"
 #include <BipedalLocomotion/Contacts/ContactList.h>
 #include <chrono>
 
+#include <BipedalLocomotion/Conversions/ManifConversions.h>
 #include <BipedalLocomotion/ML/MANNAutoregressive.h>
 #include <BipedalLocomotion/ML/MANNTrajectoryGenerator.h>
 #include <BipedalLocomotion/TextLogging/Logger.h>
 
+#include <cstddef>
+#include <iDynTree/Core/EigenHelpers.h>
+#include <iDynTree/EigenHelpers.h>
+#include <iDynTree/GeomVector3.h>
 #include <iDynTree/Model/Model.h>
 #include <manif/SE3.h>
 
 #include <iDynTree/Core/EigenHelpers.h>
+#include <manif/impl/rn/Rn.h>
+#include <manif/impl/se3/SE3.h>
 
 using namespace BipedalLocomotion::ML;
 using namespace BipedalLocomotion;
@@ -432,6 +441,67 @@ bool MANNTrajectoryGenerator::setInput(const Input& input)
                                      mergePointState.MANNAutoregressiveState.time);
 }
 
+bool MANNTrajectoryGenerator::setFrameRepresentation(
+    const MANNFrameRepresentation frameRepresentation)
+{
+    constexpr auto logPrefix = "[MANNTrajectoryGenerator::setFrameRepresentation]";
+
+    // Attempt the assignment
+    m_pimpl->output.frameRepresentation = frameRepresentation;
+
+    // Check if the assignment succeeded
+    if (m_pimpl->output.frameRepresentation == frameRepresentation)
+    {
+        return true; // Assignment successful
+    } else
+    {
+
+        log()->error("{} Unable to set the frame representation for the trajectory returned by "
+                     "MANN.",
+                     logPrefix);
+        return false; // Assignment failed
+    }
+}
+
+bool MANNTrajectoryGenerator::setReferenceFrame(const std::string& referenceFrame)
+{
+    constexpr auto logPrefix = "[MANNTrajectoryGenerator::setReferenceFrame]";
+
+    // check frame representation
+    if (!(m_pimpl->output.frameRepresentation == MANNFrameRepresentation::LOCAL))
+    {
+        log()->error("{} Unable to set the reference frame for Frame Reppresentation: {}.",
+                     logPrefix,
+                     static_cast<int>(m_pimpl->output.frameRepresentation));
+        return false;
+    }
+
+    // check if the reference frame is valid
+    if (m_pimpl->kinDyn.model().getFrameIndex(referenceFrame) == iDynTree::FRAME_INVALID_INDEX)
+    {
+        log()->error("{} Unable to find the frame named {} in the model.",
+                     logPrefix,
+                     referenceFrame);
+        return false;
+    }
+
+    // Attempt the assignment
+    m_pimpl->output.referenceFrame = referenceFrame;
+
+    // Check if the assignment succeeded
+    if (m_pimpl->output.referenceFrame == referenceFrame)
+    {
+        return true; // Assignment successful
+    } else
+    {
+
+        log()->error("{} Unable to set the reference frame for the trajectory returned by "
+                     "MANN.",
+                     logPrefix);
+        return false; // Assignment failed
+    }
+}
+
 bool MANNTrajectoryGenerator::advance()
 {
     constexpr auto logPrefix = "[MANNTrajectoryGenerator::advance]";
@@ -596,6 +666,80 @@ bool MANNTrajectoryGenerator::advance()
 
     // populate the phase list with the scaled contact list map
     m_pimpl->output.phaseList.setLists(scaledContactListMap);
+
+    // perform the frame transformation
+    if (m_pimpl->output.frameRepresentation == MANNFrameRepresentation::LOCAL)
+    {
+        if (m_pimpl->output.referenceFrame.empty())
+        {
+            log()->error("{} The reference frame is not set.", logPrefix);
+            return false;
+        }
+
+        // get the transform from the reference frame to the world frame
+        const auto iDynTreeTransform
+            = m_pimpl->kinDyn.getWorldTransform(m_pimpl->output.referenceFrame);
+        const manif::SE3d W_H_frame
+            = manif::SE3d(iDynTree::toEigen(iDynTreeTransform.getPosition()),
+                          BipedalLocomotion::Conversions::toManifRot(
+                              iDynTreeTransform.getRotation()));
+        manif::SE3d frame_H_W = W_H_frame.inverse();
+
+        // transform the base poses
+        for (auto& basePose : m_pimpl->output.basePoses)
+        {
+            basePose = frame_H_W * basePose;
+        }
+
+        // transform the com trajectory
+        for (auto& com : m_pimpl->output.comTrajectory)
+        {
+            com = frame_H_W.act(com);
+        }
+
+        // transform the contact list
+        BipedalLocomotion::Contacts::ContactListMap newContactListMap;
+        BipedalLocomotion::Contacts::ContactList newContactList
+            = m_pimpl->output.phaseList.lists().at("left_foot");
+
+        for (auto it = newContactList.begin(); it != newContactList.end(); it++)
+        {
+            BipedalLocomotion::Contacts::PlannedContact newContact{};
+            newContact.index = it->index;
+            newContact.name = it->name;
+            newContact.activationTime = it->activationTime;
+            newContact.deactivationTime = it->deactivationTime;
+            newContact.pose = frame_H_W * it->pose;
+            newContact.type = it->type;
+            newContactList.editContact(it, newContact);
+        }
+
+        newContactListMap["left_foot"] = newContactList;
+
+        newContactList = m_pimpl->output.phaseList.lists().at("right_foot");
+
+        for (auto it = newContactList.begin(); it != newContactList.end(); it++)
+        {
+            BipedalLocomotion::Contacts::PlannedContact newContact{};
+            newContact.index = it->index;
+            newContact.name = it->name;
+            newContact.activationTime = it->activationTime;
+            newContact.deactivationTime = it->deactivationTime;
+            newContact.pose = frame_H_W * it->pose;
+            newContact.type = it->type;
+            newContactList.editContact(it, newContact);
+        }
+
+        newContactListMap["right_foot"] = newContactList;
+
+        m_pimpl->output.phaseList.setLists(newContactListMap);
+
+        // transform the angular momentum
+        for (auto& angularMomentum : m_pimpl->output.angularMomentumTrajectory)
+        {
+            angularMomentum = frame_H_W.rotation() * angularMomentum;
+        }
+    }
 
     m_pimpl->isOutputValid = true;
 
