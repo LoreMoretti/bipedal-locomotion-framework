@@ -141,4 +141,12 @@ TEST_CASE("MANNTrajectoryGenerator")
     REQUIRE(std::abs(finalCoMPosition[0] - initialCoMPosition[0]) > forwardTolerance);
     REQUIRE(std::abs(finalCoMPosition[1] - initialCoMPosition[1]) < lateralTolerance);
     REQUIRE(std::abs(finalCoMPosition[2] - initialCoMPosition[2]) < verticalTolerance);
+
+    // test the change of frame
+    REQUIRE(generator.setFrameRepresentation(MANNFrameRepresentation::LOCAL));
+    REQUIRE(generator.getOutput().frameRepresentation == MANNFrameRepresentation::LOCAL);
+    REQUIRE(!generator.setReferenceFrame("unknown_frame"));
+    REQUIRE(generator.setReferenceFrame("root_link"));
+    REQUIRE(generator.getOutput().referenceFrame == "root_link");
+    REQUIRE(generator.advance());
 }
