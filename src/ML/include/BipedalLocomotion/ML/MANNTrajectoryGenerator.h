@@ -24,9 +24,7 @@ namespace ML
 
 /**
  * Frame representations for the trajectory planner.
- * The frame representation is related to positions (R3) and orientations (SO3).
- * For velocities and wrenches (R6) the representation is always MIXED
- * (https://github.com/traversaro/traversaro-phd-thesis/releases/tag/v1.0.0).
+ * For velocities and wrenches (6D) the representation is always MIXED.
  */
 enum MANNFrameRepresentation
 {
