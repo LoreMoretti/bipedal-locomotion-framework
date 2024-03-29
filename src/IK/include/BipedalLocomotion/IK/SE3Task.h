@@ -201,6 +201,8 @@ public:
      * @return the state of the controller
      */
     Mode getTaskControllerMode() const override;
+
+    void setAngularGain(const double kp_angular);
 };
 
 BLF_REGISTER_IK_TASK(SE3Task);

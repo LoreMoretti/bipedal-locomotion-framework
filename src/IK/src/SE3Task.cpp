@@ -379,3 +379,8 @@ SE3Task::Mode SE3Task::getTaskControllerMode() const
 {
     return m_controllerMode;
 }
+
+void SE3Task::setAngularGain(const double kp_angular)
+{
+    m_SO3Controller.setGains(kp_angular);
+}
