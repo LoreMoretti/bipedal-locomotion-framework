@@ -64,9 +64,12 @@ private:
 
     iDynTree::FrameIndex m_frameIndex; /**< Frame controlled by the OptimalControlElement */
 
-    static constexpr std::size_t m_spatialVelocitySize{6}; /**< Size of the spatial velocity vector. */
-    static constexpr std::size_t m_linearVelocitySize{3}; /**< Size of the linear velocity vector. */
-    static constexpr std::size_t m_angularVelocitySize{3}; /**< Size of the angular velocity vector. */
+    static constexpr std::size_t m_spatialVelocitySize{6}; /**< Size of the spatial velocity vector.
+                                                            */
+    static constexpr std::size_t m_linearVelocitySize{3}; /**< Size of the linear velocity vector.
+                                                           */
+    static constexpr std::size_t m_angularVelocitySize{3}; /**< Size of the angular velocity vector.
+                                                            */
 
     bool m_isInitialized{false}; /**< True if the task has been initialized. */
     bool m_isValid{false}; /**< True if the task is valid. */
@@ -93,21 +96,29 @@ public:
      * Initialize the task.
      * @param paramHandler pointer to the parameters handler.
      * @note the following parameters are required by the class
-     * |           Parameter Name           |   Type   |                                       Description                                      | Mandatory |
+     * |           Parameter Name           |   Type   | Description | Mandatory |
      * |:----------------------------------:|:--------:|:--------------------------------------------------------------------------------------:|:---------:|
-     * |   `robot_velocity_variable_name`   | `string` |   Name of the variable contained in `VariablesHandler` describing the robot velocity   |    Yes    |
-     * |            `frame_name`            | `string` |                       Name of the frame controlled by the SE3Task                      |    Yes    |
-     * |             `kp_linear`            | `double` or `vector<double>` |                             Gain of the position controller                            |    Yes    |
-     * |            `kp_angular`            | `double` or `vector<double>` |                           Gain of the orientation controller                           |    Yes    |
-     * |               `mask`               | `vector<bool>` |  Mask representing the linear DoFs controlled. E.g. [1,0,1] will enable the control on the x and z coordinates only and the angular part. (Default value, [1,1,1])   |    No    |
-     * |  `use_position_exogenous_feedback` |  `bool`  |    If true the task will consider the frame position provided by the user as feedback. The feedback must be set using `setFeedback()`. (Default value `false`) |   No   |
-     * |  `use_orientation_exogenous_feedback` |  `bool`  |    If true the task will consider the frame orientation provided by the user as feedback. The feedback must be set using `setFeedback()`. (Default value `false`) |   No   |
+     * |   `robot_velocity_variable_name`   | `string` |   Name of the variable contained in
+     * `VariablesHandler` describing the robot velocity   |    Yes    | |            `frame_name` |
+     * `string` |                       Name of the frame controlled by the SE3Task |    Yes    | |
+     * `kp_linear`            | `double` or `vector<double>` |                             Gain of
+     * the position controller                            |    Yes    | |            `kp_angular` |
+     * `double` or `vector<double>` |                           Gain of the orientation controller
+     * |    Yes    | |               `mask`               | `vector<bool>` |  Mask representing the
+     * linear DoFs controlled. E.g. [1,0,1] will enable the control on the x and z coordinates only
+     * and the angular part. (Default value, [1,1,1])   |    No    | |
+     * `use_position_exogenous_feedback` |  `bool`  |    If true the task will consider the frame
+     * position provided by the user as feedback. The feedback must be set using `setFeedback()`.
+     * (Default value `false`) |   No   | |  `use_orientation_exogenous_feedback` |  `bool`  |    If
+     * true the task will consider the frame orientation provided by the user as feedback. The
+     * feedback must be set using `setFeedback()`. (Default value `false`) |   No   |
      * @return True in case of success, false otherwise.
      * Where the generalized robot velocity is a vector containing the base spatial-velocity
      * (expressed in mixed representation) and the joint velocities.
      * @return True in case of success, false otherwise.
      */
-    bool initialize(std::weak_ptr<const ParametersHandler::IParametersHandler> paramHandler) override;
+    bool
+    initialize(std::weak_ptr<const ParametersHandler::IParametersHandler> paramHandler) override;
 
     /**
      * Set the kinDynComputations object.
@@ -201,6 +212,8 @@ public:
      * @return the state of the controller
      */
     Mode getTaskControllerMode() const override;
+
+    void setAngularGain(const double kp_angular);
 };
 
 BLF_REGISTER_IK_TASK(SE3Task);
