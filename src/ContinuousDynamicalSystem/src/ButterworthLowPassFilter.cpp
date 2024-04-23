@@ -181,7 +181,7 @@ bool ButterworthLowPassFilter::reset(Eigen::Ref<const Eigen::VectorXd> initialSt
     return true;
 }
 
-bool ButterworthLowPassFilter::setInput(Eigen::Ref<const Eigen::VectorXd> input)
+bool ButterworthLowPassFilter::setInput(const Eigen::VectorXd& input)
 {
     constexpr auto logPrefix = "[ButterworthLowPassFilter::setInput]";
     if (m_pimpl->inputBuffer.empty() || m_pimpl->outputBuffer.empty())
@@ -201,11 +201,6 @@ bool ButterworthLowPassFilter::setInput(Eigen::Ref<const Eigen::VectorXd> input)
 
     m_pimpl->isOutputValid = false;
     return true;
-}
-
-bool ButterworthLowPassFilter::setInput(const Eigen::VectorXd& input)
-{
-    return this->setInput(Eigen::Ref<const Eigen::VectorXd>(input));
 }
 
 bool ButterworthLowPassFilter::advance()

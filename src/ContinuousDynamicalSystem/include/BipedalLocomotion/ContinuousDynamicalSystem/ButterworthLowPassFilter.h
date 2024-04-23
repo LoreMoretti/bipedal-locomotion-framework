@@ -80,9 +80,9 @@ namespace ContinuousDynamicalSystem
  * \f]
  * Once the numerator and the denominator are computed we can easily antitransform the transfer function
  * to obtain the coefficients of the filter as
- * \[
+ * \f[
  * y[k] = \frac{1}{b_0} \left( a_0 x[k] + a_1 x[k-1] + \ldots + a_n x[k-n] - b_1 y[k-1] - \ldots - b_n y[k-n] \right)
- * \]
+ * \f]
  * where \f$x[k]\f$ is the input of the filter and \f$y[k]\f$ is the output of the filter.
  */
 class ButterworthLowPassFilter
@@ -140,13 +140,6 @@ public:
      * @return True in case of success and false otherwise
      */
     bool setInput(const Eigen::VectorXd& input) override;
-
-    /**
-     *  Set the input of the filter
-     * @param input the vector representing the input of the filter
-     * @return True in case of success and false otherwise
-     */
-    bool setInput(Eigen::Ref<const Eigen::VectorXd> input);
 
     /**
      * Determines the validity of the object retrieved with getOutput()
