@@ -134,6 +134,7 @@ struct CentroidalMPC::Impl
         casadi::MX linearVelocity;
         casadi::MX orientation;
         casadi::MX isEnabled;
+        casadi::MX amountOfNormalForceRespectToRobotWeight;
         std::vector<CasadiCorner> corners;
 
         std::string contactName;
@@ -157,6 +158,8 @@ struct CentroidalMPC::Impl
             this->position = casadi::MX::sym(contactName + "_position", 3);
             this->linearVelocity = casadi::MX::sym(contactName + "_linear_velocity", 3);
             this->isEnabled = casadi::MX::sym(contactName + "_is_enable");
+            this->amountOfNormalForceRespectToRobotWeight
+                = casadi::MX::sym(contactName + "_amount_of_normal_force_respect_to_robot_weight");
 
             return *this;
         }
@@ -186,6 +189,8 @@ struct CentroidalMPC::Impl
     {
         int solverVerbosity{0}; /**< Verbosity of ipopt */
         std::string ipoptLinearSolver{"mumps"}; /**< Linear solved used by ipopt */
+        bool errorOnFail{true}; /**< True if the user wants to throw an error in case of failure of
+                                   the MPC */
         double ipoptTolerance{1e-8}; /**< Tolerance of ipopt
                                         (https://coin-or.github.io/Ipopt/OPTIONS.html#OPT_tol) */
         int ipoptMaxIteration{3000}; /**< Maximum number of iteration */
@@ -234,6 +239,7 @@ struct CentroidalMPC::Impl
         casadi::DM* upperLimitPosition;
         casadi::DM* lowerLimitPosition;
         casadi::DM* isEnabled;
+        casadi::DM* amountOfNormalForceRespectToRobotWeight;
     };
     struct ControllerInputs
     {
@@ -274,6 +280,7 @@ struct CentroidalMPC::Impl
         Eigen::Vector3d forceRateOfChange;
         double angularMomentum;
         double contactForceSymmetry;
+        double force;
     };
     Weights weights;
 
@@ -284,6 +291,18 @@ struct CentroidalMPC::Impl
     };
 
     std::unordered_map<std::string, ContactBoundingBox> contactBoundingBoxes;
+
+    struct CoMLimits
+    {
+        int cbfHorizon{0};
+        double cbfGain{0.0};
+        double cbfMultiplier{0.0};
+        double zMin{0.0};
+        double zMax{0.0};
+        bool enableZLimit{false};
+    };
+
+    CoMLimits comLimits;
 
     bool loadContactCorners(std::shared_ptr<const ParametersHandler::IParametersHandler> ptr,
                             DiscreteGeometryContact& contact)
@@ -415,14 +434,73 @@ struct CentroidalMPC::Impl
              && getParameter(ptr,
                              "contact_force_symmetry_weight",
                              this->weights.contactForceSymmetry);
+        ok = ok && getParameter(ptr, "force_weight", this->weights.force);
 
         // initialize the friction cone
         ok = ok && frictionCone.initialize(ptr);
         ok = ok && getParameter(ptr, "solver_name", this->optiSettings.solverName);
+        ok = ok && getParameter(ptr, "enable_z_limit", this->comLimits.enableZLimit);
+
         if (!ok)
         {
             return false;
         }
+
+        if (this->comLimits.enableZLimit)
+        {
+            if (!getParameter(ptr, "com_z_min", this->comLimits.zMin))
+            {
+                return false;
+            }
+            if (!getParameter(ptr, "com_z_max", this->comLimits.zMax))
+            {
+                return false;
+            }
+
+            if (this->comLimits.zMin > this->comLimits.zMax)
+            {
+                log()->error("{} The minimum value of the CoM z limit is greater than the maximum "
+                             "value. The minimum value is {} and the maximum value is {}.",
+                             logPrefix,
+                             this->comLimits.zMin,
+                             this->comLimits.zMax);
+                return false;
+            }
+
+            if (!getParameter(ptr, "cbf_horizon", this->comLimits.cbfHorizon))
+            {
+                return false;
+            }
+
+            if (!getParameter(ptr, "cbf_gain", this->comLimits.cbfGain))
+            {
+                return false;
+            }
+
+            if (!getParameter(ptr, "cbf_multiplier", this->comLimits.cbfMultiplier))
+            {
+                return false;
+            }
+
+            // cbf gain and multiplier must be positive and lower than 1
+            if (this->comLimits.cbfGain < 0 || this->comLimits.cbfGain > 1)
+            {
+                log()->error("{} The gain of the CoM z limit is negative or greater than 1. The gain "
+                             "is {}.",
+                             logPrefix,
+                             this->comLimits.cbfGain);
+                return false;
+            }
+
+            if (this->comLimits.cbfHorizon < 0)
+            {
+                log()->error("{} The horizon of the CoM z limit is negative. The horizon is {}.",
+                             logPrefix,
+                             this->comLimits.cbfHorizon);
+                return false;
+            }
+        }
+
         if (this->optiSettings.solverName != "ipopt" && this->optiSettings.solverName != "sqp")
         {
             log()->error("{} The solver name '{}' is not supported. The supported solvers are "
@@ -439,12 +517,13 @@ struct CentroidalMPC::Impl
             getOptionalParameter(ptr, "ipopt_max_iteration", this->optiSettings.ipoptMaxIteration);
         } else
         {
-            getOptionalParameter(ptr, "jit_compilation", this->optiSettings.isJITEnabled);
             getOptionalParameter(ptr,
                                  "number_of_qp_iterations",
                                  this->optiSettings.numberOfQPIterations);
         }
 
+        getOptionalParameter(ptr, "error_on_fail", this->optiSettings.errorOnFail);
+        getOptionalParameter(ptr, "jit_compilation", this->optiSettings.isJITEnabled);
         getOptionalParameter(ptr, "solver_verbosity", this->optiSettings.solverVerbosity);
         getOptionalParameter(ptr, "is_warm_start_enabled", this->optiSettings.isWarmStartEnabled);
         getOptionalParameter(ptr, "is_cse_enabled", this->optiSettings.isCseEnabled);
@@ -565,11 +644,13 @@ struct CentroidalMPC::Impl
         // - centroidalVariables = 8: external force + external torque + com current + dcom current
         //                            + current angular momentum + gravity + com reference
         //                            + angular momentum reference
-        // - contactVariables = 6: for each contact we have current position + nominal position +
-        //                         orientation + is enabled + upper limit in position
-        //                         + lower limit in position
+        // - contactVariables = 7: for each contact we have current position + nominal position
+        //                          + orientation + is enabled
+        //                          + amount of normal force respect to robot weight
+        //                          + upper limit in position
+        //                          + lower limit in position
         constexpr std::size_t centroidalVariables = 8;
-        constexpr std::size_t contactVariables = 6;
+        constexpr std::size_t contactVariables = 7;
 
         std::size_t vectorizedOptiInputsSize = centroidalVariables + //
                                                (this->output.contacts.size() * contactVariables);
@@ -656,6 +737,11 @@ struct CentroidalMPC::Impl
             this->vectorizedOptiInputs.push_back(casadi::DM::zeros(1, this->optiSettings.horizon));
             this->controllerInputs.contacts[key].isEnabled = &this->vectorizedOptiInputs.back();
 
+            // The amount of normal force respect to the robot weight
+            this->vectorizedOptiInputs.push_back(casadi::DM::zeros(1, this->optiSettings.horizon));
+            this->controllerInputs.contacts[key].amountOfNormalForceRespectToRobotWeight
+                = &this->vectorizedOptiInputs.back();
+
             // Upper limit of the position of the contact. It is expressed in the contact body frame
             this->vectorizedOptiInputs.push_back(
                 casadi::DM::zeros(vector3Size, this->optiSettings.horizon));
@@ -728,6 +814,10 @@ struct CentroidalMPC::Impl
             // Maximum admissible contact force. It is expressed in the contact body frame
             c.isEnabled = this->opti.parameter(1, this->optiSettings.horizon);
 
+            // The amount of normal force respect to the robot weight
+            c.amountOfNormalForceRespectToRobotWeight
+                = this->opti.parameter(1, this->optiSettings.horizon);
+
             // The nominal contact position is a parameter that regularize the solution
             c.nominalPosition = this->opti.parameter(vector3Size, stateHorizon);
 
@@ -782,7 +872,18 @@ struct CentroidalMPC::Impl
             solverOptions["tol"] = this->optiSettings.ipoptTolerance;
             solverOptions["linear_solver"] = this->optiSettings.ipoptLinearSolver;
             casadiOptions["expand"] = true;
-            casadiOptions["error_on_fail"] = true;
+            casadiOptions["error_on_fail"] = this->optiSettings.errorOnFail;
+
+            if (this->optiSettings.isJITEnabled)
+            {
+                casadiOptions["jit"] = true;
+                casadiOptions["compiler"] = "shell";
+
+                casadi::Dict jitOptions;
+                jitOptions["flags"] = {"-O3"};
+                jitOptions["verbose"] = true;
+                casadiOptions["jit_options"] = jitOptions;
+            }
 
             this->opti.solver("ipopt", casadiOptions, solverOptions);
             return;
@@ -805,11 +906,11 @@ struct CentroidalMPC::Impl
             casadiOptions["print_time"] = false;
             osqpOptions["verbose"] = false;
         }
-        casadiOptions["error_on_fail"] = false;
+        casadiOptions["error_on_fail"] = this->optiSettings.errorOnFail;
         casadiOptions["expand"] = true;
         casadiOptions["qpsol"] = "osqp";
 
-        solverOptions["error_on_fail"] = false;
+        solverOptions["error_on_fail"] = this->optiSettings.errorOnFail;
 
         osqpOptions["verbose"] = false;
         solverOptions["osqp"] = osqpOptions;
@@ -883,6 +984,18 @@ struct CentroidalMPC::Impl
         this->opti.subject_to(extractFutureValuesFromState(com) == fullTrajectory[0]);
         this->opti.subject_to(extractFutureValuesFromState(dcom) == fullTrajectory[1]);
         this->opti.subject_to(extractFutureValuesFromState(angularMomentum) == fullTrajectory[2]);
+
+        if (this->comLimits.enableZLimit)
+        {
+            auto h = -this->comLimits.cbfMultiplier * (com(2, Sl()) - this->comLimits.zMin)
+                     * (com(2, Sl()) - this->comLimits.zMax);
+            for (int i = 0;
+                 i < std::min(this->comLimits.cbfHorizon, this->optiSettings.horizon);
+                 i++)
+            {
+                this->opti.subject_to(h(i + 1) + (this->comLimits.cbfGain - 1) * h(i) >= 0);
+            }
+        }
 
         // footstep dynamics
         std::size_t contactIndex = 0;
@@ -996,6 +1109,12 @@ struct CentroidalMPC::Impl
                         * casadi::MX::sumsqr(forceRateOfChange(1, Sl()));
                 cost += this->weights.forceRateOfChange(2)
                         * casadi::MX::sumsqr(forceRateOfChange(2, Sl()));
+                cost += this->weights.force
+                        * casadi::MX::sumsqr(
+                            corner.force(2, Sl())
+                            - BipedalLocomotion::Math::StandardAccelerationOfGravitation
+                                  * contact.amountOfNormalForceRespectToRobotWeight
+                                  / contact.corners.size());
             }
         }
 
@@ -1046,6 +1165,8 @@ struct CentroidalMPC::Impl
             concatenateInput(contact.nominalPosition, "contact_" + key + "_nominal_position");
             concatenateInput(contact.orientation, "contact_" + key + "_orientation_input");
             concatenateInput(contact.isEnabled, "contact_" + key + "is_enable_in");
+            concatenateInput(contact.amountOfNormalForceRespectToRobotWeight,
+                             "contact_" + key + "_amount_of_normal_force_respect_to_robot_weight");
             concatenateInput(contact.upperLimitPosition,
                              "contact_" + key + "_upper_limit_position");
             concatenateInput(contact.lowerLimitPosition,
@@ -1490,6 +1611,9 @@ bool CentroidalMPC::setContactPhaseList(const Contacts::ContactPhaseList& contac
         // Maximum admissible contact force. It is expressed in the contact body frame
         toEigen(*inputs.contacts[key].isEnabled).setZero();
 
+        // Amount of normal force respect to the robot weight
+        toEigen(*inputs.contacts[key].amountOfNormalForceRespectToRobotWeight).setZero();
+
         // The nominal contact position is a parameter that regularize the solution
         toEigen(*inputs.contacts[key].nominalPosition).setZero();
     }
@@ -1528,6 +1652,8 @@ bool CentroidalMPC::setContactPhaseList(const Contacts::ContactPhaseList& contac
         const std::chrono::nanoseconds duration = tFinal - tInitial;
         const int numberOfSamples = duration / m_pimpl->optiSettings.samplingTime;
 
+        const int numberOfActiveContacts = it->activeContacts.size();
+
         for (const auto& [key, contact] : it->activeContacts)
         {
             using namespace BipedalLocomotion::Conversions;
@@ -1553,6 +1679,10 @@ bool CentroidalMPC::setContactPhaseList(const Contacts::ContactPhaseList& contac
             toEigen(*(inputContact->second.isEnabled))
                 .middleCols(index, numberOfSamples)
                 .setConstant(isEnabled);
+
+            toEigen(*(inputContact->second.amountOfNormalForceRespectToRobotWeight))
+                .middleCols(index, numberOfSamples)
+                .setConstant(1.0 / double(numberOfActiveContacts));
         }
 
         index += numberOfSamples;
