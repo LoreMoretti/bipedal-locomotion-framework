@@ -14,6 +14,7 @@
 #include <BipedalLocomotion/System/Advanceable.h>
 #include <BipedalLocomotion/TextLogging/Logger.h>
 
+#include <cstddef>
 #include <iDynTree/VectorDynSize.h>
 
 #include <CoMHeightTrajectoryGenerator.h>
@@ -144,6 +145,12 @@ public:
      * @return True in case of success, false otherwise.
      */
     bool advance() override;
+
+    /**
+     * @brief Get the sampling time of the generator.
+     * @return Sampling time of the generator.
+     */
+    std::chrono::nanoseconds getSamplingTime() const;
 
 private:
     class Impl;

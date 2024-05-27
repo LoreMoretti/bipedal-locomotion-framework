@@ -836,6 +836,12 @@ bool BipedalLocomotion::Planners::UnicycleTrajectoryGenerator::generateFirstTraj
     return true;
 }
 
+std::chrono::nanoseconds
+BipedalLocomotion::Planners::UnicycleTrajectoryGenerator::getSamplingTime() const
+{
+    return m_pImpl->parameters.dt;
+};
+
 void Planners::UnicycleTrajectoryGenerator::Impl::resetContactList(
     const std::chrono::nanoseconds& time,
     const Contacts::ContactList& previousContactList,
