@@ -10,8 +10,6 @@
 
 #include <BipedalLocomotion/Contacts/ContactList.h>
 #include <BipedalLocomotion/TextLogging/Logger.h>
-#include <Eigen/src/Core/Map.h>
-#include <Eigen/src/Core/Matrix.h>
 #include <UnicyclePlanner.h>
 #include <cstddef>
 #include <iDynTree/EigenHelpers.h>
@@ -41,6 +39,16 @@ bool getContactList(const std::chrono::nanoseconds& initTime,
                     const int& contactFrameIndex,
                     const std::string& contactName,
                     BipedalLocomotion::Contacts::ContactList& contactList);
+/**
+ * Merge two steps sequences, and stores the merged output in the second one.
+ * The new steps which has an impact time lower than the current time are discarded.
+ * @param newSteps the new list of steps.
+ * @param currentSteps the cuurent list of steps.
+ * @param currentTime the current time.
+ */
+void mergeSteps(const std::deque<Step>& newSteps,
+                std::deque<Step>& currentSteps,
+                const std::chrono::nanoseconds& currentTime);
 
 /**
  * It appends a vector to a deque.
@@ -116,7 +124,6 @@ void convertVector(const std::vector<From>& inputVect, std::vector<To>& outputVe
 }
 
 } // namespace Conversions
-
 } // namespace BipedalLocomotion::Planners::UnicycleUtilities
 
-#endif // BIPEDAL_LOCOMOTION_PLANNERS_UNICYCLE_TRAJECTORY_PLANNER_
+#endif // BIPEDAL_LOCOMOTION_PLANNERS_UNICYCLE_UTILITIES_H

@@ -43,10 +43,6 @@ struct BipedalLocomotion::Planners::UnicycleTrajectoryGeneratorInput
      */
     Eigen::VectorXd plannerInput; /**< Input to the unicycle planner */
 
-    manif::SE3d w_H_leftFoot; /**< Left foot pose in the world frame */
-
-    manif::SE3d w_H_rightFoot; /**< Right foot pose in the world frame */
-
     static UnicycleTrajectoryGeneratorInput generateDummyUnicycleTrajectoryGeneratorInput();
 };
 
@@ -147,8 +143,8 @@ public:
     bool advance() override;
 
     /**
-     * @brief Get the sampling time of the generator.
-     * @return Sampling time of the generator.
+     * @brief Get the sampling time of the planner.
+     * @return Sampling time of the planner.
      */
     std::chrono::nanoseconds getSamplingTime() const;
 
