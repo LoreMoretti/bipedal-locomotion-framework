@@ -46,11 +46,24 @@ class JointTrackingTask : public TSIDLinearTask
     bool m_isValid{false}; /**< True if the task is valid. */
 
     std::string m_robotAccelerationVariableName;
+    System::VariablesHandler::VariableDescription m_robotAccelerationVariable; /**< Variable
+                                                                                  describing the
+                                                                                  robot acceleration
+                                                                                  (base + joint) */
 
     std::shared_ptr<iDynTree::KinDynComputations> m_kinDyn; /**< Pointer to a KinDynComputations
                                                                object */
+    Eigen::MatrixXd m_massMatrix; /**< Mass Matrix */
+
+    enum class Mode
+    {
+        computedTorque,
+        passivityBased
+    };
+    Mode m_mode /**< Mode of the task. "computed_torque" or "passivity_based"*/;
 
 public:
+    // clang-format off
     /**
      * Initialize the planner.
      * @param paramHandler pointer to the parameters handler.
@@ -64,6 +77,7 @@ public:
      * @return True in case of success, false otherwise.
      */
     bool initialize(std::weak_ptr<const ParametersHandler::IParametersHandler> paramHandler) override;
+    // clang-format on
 
     /**
      * Set the kinDynComputations object.
@@ -113,7 +127,8 @@ public:
      * Set the desired setpoint.
      * @param jointPosition vector containing the desired joint position in radians.
      * @param jointVelocity vector containing the desired joint velocity in radians per second.
-     * @param jointAcceleration vector containing the desired joint velocity in radians per second square.
+     * @param jointAcceleration vector containing the desired joint velocity in radians per second
+     * square.
      * @return True in case of success, false otherwise.
      */
     bool setSetPoint(Eigen::Ref<const Eigen::VectorXd> jointPosition,
