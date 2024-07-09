@@ -30,25 +30,27 @@ bool JointTrackingTask::setVariablesHandler(const System::VariablesHandler& vari
 {
     constexpr auto errorPrefix = "[JointTrackingTask::setVariablesHandler]";
 
+    System::VariablesHandler::VariableDescription robotAccelerationVariable;
+
     if (!m_isInitialized)
     {
         log()->error("{} The task is not initialized. Please call initialize method.", errorPrefix);
         return false;
     }
 
-    if (!variablesHandler.getVariable(m_robotAccelerationVariableName, m_robotAccelerationVariable))
+    if (!variablesHandler.getVariable(m_robotAccelerationVariableName, robotAccelerationVariable))
     {
         log()->error("{} Error while retrieving the robot acceleration variable.", errorPrefix);
         return false;
     }
 
-    if (m_robotAccelerationVariable.size != m_kinDyn->getNrOfDegreesOfFreedom() + 6)
+    if (robotAccelerationVariable.size != m_kinDyn->getNrOfDegreesOfFreedom() + 6)
     {
         log()->error("{} The size of the robot acceleration variable does not match with the one "
                      "stored in kinDynComputations object. Expected: {}. Given: {}",
                      errorPrefix,
                      m_kinDyn->getNrOfDegreesOfFreedom() + 6,
-                     m_robotAccelerationVariable.size);
+                     robotAccelerationVariable.size);
         return false;
     }
 
@@ -60,15 +62,14 @@ bool JointTrackingTask::setVariablesHandler(const System::VariablesHandler& vari
     // A is constant
     // here we assume that the first robot acceleration is stored as [base_acceleration;
     // joint_acceleration]
-    iDynTree::toEigen(this->subA(m_robotAccelerationVariable))
+    iDynTree::toEigen(this->subA(robotAccelerationVariable))
         .rightCols(m_kinDyn->getNrOfDegreesOfFreedom())
         .setIdentity();
 
     return true;
 }
 
-bool JointTrackingTask::initialize(
-    std::weak_ptr<const ParametersHandler::IParametersHandler> paramHandler)
+bool JointTrackingTask::initialize(std::weak_ptr<const ParametersHandler::IParametersHandler> paramHandler)
 {
     constexpr auto errorPrefix = "[JointTrackingTask::initialize]";
 
@@ -91,29 +92,6 @@ bool JointTrackingTask::initialize(
         return false;
     }
 
-    std::string mode;
-    if (!ptr->getParameter("mode", mode))
-    {
-        log()->info("{} The mode variable is not found. It is set by default "
-                    "to \"computed_torque\".",
-                    errorPrefix);
-        mode = "computed_torque";
-    }
-    if (mode == "computed_torque")
-    {
-        m_mode = Mode::computedTorque;
-    } else if (mode == "passivity_based")
-    {
-        m_mode = Mode::passivityBased;
-    } else
-    {
-        log()->error("{} The mode variable is not valid. It should be either \"computed_torque\" "
-                     "or \"passivity_based\". Given: {}",
-                     errorPrefix,
-                     mode);
-        return false;
-    };
-
     // set the gains for the controllers
     m_kp.resize(m_kinDyn->getNrOfDegreesOfFreedom());
     m_kd.resize(m_kinDyn->getNrOfDegreesOfFreedom());
@@ -131,8 +109,7 @@ bool JointTrackingTask::initialize(
 
     if (m_kp.size() != m_kinDyn->getNrOfDegreesOfFreedom())
     {
-        log()->error("{} The size of the kp gain does not match with the one stored in "
-                     "kinDynComputations object. "
+        log()->error("{} The size of the kp gain does not match with the one stored in kinDynComputations object. "
                      "Expected: {}. Given: {}",
                      errorPrefix,
                      m_kinDyn->getNrOfDegreesOfFreedom(),
@@ -142,8 +119,7 @@ bool JointTrackingTask::initialize(
 
     if (m_kd.size() != m_kinDyn->getNrOfDegreesOfFreedom())
     {
-        log()->error("{} The size of the kd gain does not match with the one stored in "
-                     "kinDynComputations object. "
+        log()->error("{} The size of the kd gain does not match with the one stored in kinDynComputations object. "
                      "Expected: {}. Given: {}",
                      errorPrefix,
                      m_kinDyn->getNrOfDegreesOfFreedom(),
@@ -160,9 +136,6 @@ bool JointTrackingTask::initialize(
     m_desiredJointAcceleration = Eigen::VectorXd::Zero(m_kinDyn->getNrOfDegreesOfFreedom());
     m_jointPosition = Eigen::VectorXd::Zero(m_kinDyn->getNrOfDegreesOfFreedom());
     m_jointVelocity = Eigen::VectorXd::Zero(m_kinDyn->getNrOfDegreesOfFreedom());
-
-    m_massMatrix.resize(m_kinDyn->getNrOfDegreesOfFreedom() + 6,
-                        m_kinDyn->getNrOfDegreesOfFreedom() + 6);
 
     m_isInitialized = true;
     return true;
@@ -186,28 +159,9 @@ bool JointTrackingTask::update()
         return false;
     }
 
-    if (m_mode == Mode::passivityBased)
-    {
-        if (!m_kinDyn->getFreeFloatingMassMatrix(m_massMatrix))
-        {
-            log()->error("{} Unable to get the mass matrix.", errorPrefix);
-            return false;
-        }
-    } else if (m_mode == Mode::computedTorque)
-    {
-        m_massMatrix.setIdentity();
-    }
-
-    m_b = m_massMatrix.block(6, 6, m_jointPosition.size(), m_jointPosition.size())
-          * m_desiredJointAcceleration;
+    m_b = m_desiredJointAcceleration;
     m_b.noalias() += m_kp.asDiagonal() * (m_desiredJointPosition - m_jointPosition);
     m_b.noalias() += m_kd.asDiagonal() * (m_desiredJointVelocity - m_jointVelocity);
-
-    // update Task Matrix A
-    // Custom matrix initialization
-    iDynTree::toEigen(this->subA(m_robotAccelerationVariable))
-        .rightCols(m_kinDyn->getNrOfDegreesOfFreedom())
-        = m_massMatrix.block(6, 6, m_jointPosition.size(), m_jointPosition.size());
 
     m_isValid = true;
 
@@ -220,14 +174,14 @@ bool JointTrackingTask::setSetPoint(Eigen::Ref<const Eigen::VectorXd> jointPosit
 }
 
 bool JointTrackingTask::setSetPoint(Eigen::Ref<const Eigen::VectorXd> jointPosition,
-                                    Eigen::Ref<const Eigen::VectorXd> jointVelocity)
+                                     Eigen::Ref<const Eigen::VectorXd> jointVelocity)
 {
     return this->setSetPoint(jointPosition, jointVelocity, m_zero);
 }
 
 bool JointTrackingTask::setSetPoint(Eigen::Ref<const Eigen::VectorXd> jointPosition,
-                                    Eigen::Ref<const Eigen::VectorXd> jointVelocity,
-                                    Eigen::Ref<const Eigen::VectorXd> jointAcceleration)
+                                     Eigen::Ref<const Eigen::VectorXd> jointVelocity,
+                                     Eigen::Ref<const Eigen::VectorXd> jointAcceleration)
 {
     constexpr std::string_view errorPrefix = "[JointTrackingTask::setSetpoint] ";
 
