@@ -20,6 +20,12 @@ All notable changes to this project are documented in this file.
 - Implement `ButterworthLowPassFilter` class (https://github.com/ami-iit/bipedal-locomotion-framework/pull/838)
 - Implement `Conversions::toiDynTreeRot` function (https://github.com/ami-iit/bipedal-locomotion-framework/pull/842)
 - Add the `Planners::UnicycleTrajectoryGenerator` to mimic the functionalities of the unicycle planner deployed in [walking-controllers](https://github.com/robotology/walking-controllers) (https://github.com/ami-iit/bipedal-locomotion-framework/pull/845)
+- Create python bindings of `VectorsCollection` (https://github.com/ami-iit/bipedal-locomotion-framework/pull/854)
+- Added a simple motor control example (https://github.com/ami-iit/bipedal-locomotion-framework/pull/855)
+- Add `setControlModeAsync` function to set motor control mode in an asynchronous process (https://github.com/ami-iit/bipedal-locomotion-framework/pull/860)
+- Add launch parameter to `blf-logger-with-audio.sh` script to set logger launch file (https://github.com/ami-iit/bipedal-locomotion-framework/pull/867)
+- Add `getJointLimits` function to set get actuated joints position limits (https://github.com/ami-iit/bipedal-locomotion-framework/pull/868)
+- Add `YarpSensorBridge::disableJointEncoderAccelerationReading` function to disable reading of joint encoder acceleration measurements (https://github.com/ami-iit/bipedal-locomotion-framework/pull/876)
 
 ### Changed
 - 🤖 [ergoCubSN001] Add logging of the wrist and fix the name of the waist imu (https://github.com/ami-iit/bipedal-locomotion-framework/pull/810)
