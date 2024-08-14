@@ -658,6 +658,60 @@ bool YarpRobotLoggerDevice::initMetadata(const std::string& nameKey,
     return ok;
 }
 
+bool YarpRobotLoggerDevice::addChannel(const std::string& nameKey,
+                                       std::size_t vectorSize,
+                                       const std::vector<std::string>& metadataNames)
+{
+    if (metadataNames.empty() || vectorSize != metadataNames.size())
+    {
+        log()->warn("The metadata names are empty or the size of the metadata names is different "
+                    "from the vector size. The default metadata will be used.");
+        if (!m_bufferManager.addChannel({nameKey, {vectorSize, 1}}))
+        {
+            log()->error("Failed to add the channel in buffer manager named: {}", nameKey);
+            return false;
+        }
+    } else
+    {
+        if (!m_bufferManager.addChannel({nameKey, {metadataNames.size(), 1}, metadataNames}))
+        {
+            log()->error("Failed to add the channel in buffer manager named: {}", nameKey);
+            return false;
+        }
+    }
+    if (m_sendDataRT)
+    {
+        std::string rtNameKey = robotRtRootName + treeDelim + nameKey;
+
+        // if the metadata names are empty then the default metadata will be used
+        if (!metadataNames.empty())
+        {
+            if (!m_vectorCollectionRTDataServer.populateMetadata(rtNameKey, metadataNames))
+            {
+                log()->error("[Realtime logging] Failed to populate the metadata for the signal {}",
+                             rtNameKey);
+                return false;
+            }
+
+        } else
+        {
+            std::vector<std::string> defaultMetadata;
+            for (std::size_t i = 0; i < vectorSize; i++)
+            {
+                defaultMetadata.push_back("element_" + std::to_string(i));
+            }
+
+            if (!m_vectorCollectionRTDataServer.populateMetadata(rtNameKey, defaultMetadata))
+            {
+                log()->error("[Realtime logging] Failed to populate the metadata for the signal {}",
+                             rtNameKey);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool YarpRobotLoggerDevice::attachAll(const yarp::dev::PolyDriverList& poly)
 {
     constexpr auto logPrefix = "[YarpRobotLoggerDevice::attachAll]";
