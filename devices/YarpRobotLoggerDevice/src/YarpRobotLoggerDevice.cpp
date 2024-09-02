@@ -16,6 +16,11 @@
 #include <string>
 #include <tuple>
 
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 #include <BipedalLocomotion/ParametersHandler/IParametersHandler.h>
 #include <BipedalLocomotion/ParametersHandler/YarpImplementation.h>
 #include <BipedalLocomotion/System/Clock.h>
@@ -123,6 +128,36 @@ YarpRobotLoggerDevice::YarpRobotLoggerDevice()
 }
 
 YarpRobotLoggerDevice::~YarpRobotLoggerDevice() = default;
+
+bool YarpRobotLoggerDevice::threadInit()
+{
+    constexpr auto logPrefix = "[YarpRobotLoggerDevice::threadInit]";
+
+#if defined(__linux__)
+    // Get the native handle
+    pthread_t native_handle = pthread_self();
+
+    // Set thread scheduling parameters
+    sched_param param;
+    param.sched_priority = 80;
+
+    // Set the scheduling policy to SCHED_FIFO and priority
+    int ret = pthread_setschedparam(native_handle, SCHED_FIFO, &param);
+    if (ret != 0)
+    {
+        log()->error("{} Failed to set scheduling policy, with error: {}", logPrefix, ret);
+        return false;
+    } else
+    {
+        log()->info("{} Scheduling policy set to SCHED_FIFO with priority {}",
+                    logPrefix,
+                    param.sched_priority);
+        return true;
+    }
+#endif
+
+    return true;
+}
 
 bool YarpRobotLoggerDevice::open(yarp::os::Searchable& config)
 {
@@ -1189,14 +1224,17 @@ void YarpRobotLoggerDevice::lookForExogenousSignals()
                         continue;
                     }
 
-                    log()->info("[YarpRobotLoggerDevice::lookForExogenousSignals] Attempt to get the "
+                    log()->info("[YarpRobotLoggerDevice::lookForExogenousSignals] Attempt to get "
+                                "the "
                                 "metadata for the vectors collection signal named: {}",
                                 name);
 
                     if (!signal.client.getMetadata(signal.metadata))
                     {
-                        log()->warn("[YarpRobotLoggerDevice::lookForExogenousSignals] Unable to get "
-                                    "the metadata for the signal named: {}. The exogenous signal will "
+                        log()->warn("[YarpRobotLoggerDevice::lookForExogenousSignals] Unable to "
+                                    "get "
+                                    "the metadata for the signal named: {}. The exogenous signal "
+                                    "will "
                                     "not contain the metadata.",
                                     name);
                     }
@@ -1204,7 +1242,6 @@ void YarpRobotLoggerDevice::lookForExogenousSignals()
             }
 
             signal.connected = connectionDone;
-
         }
     };
 
@@ -1718,12 +1755,11 @@ void YarpRobotLoggerDevice::run()
         yarp::os::Bottle* b = m_textLoggingPort.read(false);
         if (b != nullptr)
         {
-            msg = BipedalLocomotion::TextLoggingEntry::deserializeMessage(*b,
-                                                                            std::to_string(time));
+            msg = BipedalLocomotion::TextLoggingEntry::deserializeMessage(*b, std::to_string(time));
             if (msg.isValid)
             {
                 signalFullName = msg.portSystem + "::" + msg.portPrefix + "::" + msg.processName
-                                    + "::p" + msg.processPID;
+                                 + "::p" + msg.processPID;
 
                 // matlab does not support the character - as a key of a struct
                 findAndReplaceAll(signalFullName, "-", "_");
@@ -1736,7 +1772,7 @@ void YarpRobotLoggerDevice::run()
                     m_bufferManager.addChannel({signalFullName, {1, 1}});
                     m_textLogsStoredInManager.insert(signalFullName);
                 }
-                //Not using logData here because we don't want to stream the data to RT
+                // Not using logData here because we don't want to stream the data to RT
                 m_bufferManager.push_back(msg, time, signalFullName);
             }
             bufferportSize = m_textLoggingPort.getPendingReads();
