@@ -123,6 +123,23 @@ bool FixedFootDetector::updateFixedFoot()
         return true;
     }
 
+    // TO DEBUG: NO MATTER WHAT, IF AVAILABLE USE THE LEFT FOOT AS FIXED
+    // update the contacts
+    for (auto& [name, contact] : m_contactStates)
+    {
+        contact.lastUpdateTime = m_currentTime;
+        contact.switchTime = phase->beginTime;
+        if (name == "left_foot")
+        {
+            contact.isActive = true;
+            contact.pose = phase->activeContacts.find(name)->second->pose;
+        } else
+        {
+            contact.isActive = false;
+        }
+    }
+    return true;
+
     // if the current phase is the first and there are at least 2 phases the active contact will be
     // the one that is going to be active in the next phase.
     if (m_contactPhaselist.size() > 1)
