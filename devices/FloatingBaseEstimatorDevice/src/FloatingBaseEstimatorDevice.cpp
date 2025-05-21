@@ -9,6 +9,7 @@
 #include <BipedalLocomotion/YarpUtilities/Helper.h>
 
 #include <BipedalLocomotion/FloatingBaseEstimators/InvariantEKFBaseEstimator.h>
+#include <BipedalLocomotion/TextLogging/Logger.h>
 #include <iDynTree/EigenHelpers.h>
 #include <iDynTree/YARPConversions.h>
 #include <yarp/os/LogStream.h>
@@ -85,29 +86,30 @@ bool FloatingBaseEstimatorDevice::open(yarp::os::Searchable& config)
 
 bool FloatingBaseEstimatorDevice::setupRobotModel(yarp::os::Searchable& config)
 {
+    constexpr auto logPrefix = "[FloatingBaseEstimatorDevice::setupRobotModel]";
 
     std::string modelFileName;
     std::vector<std::string> jointsList;
     if (!YarpUtilities::getElementFromSearchable(config, "model_file", modelFileName))
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupRobotModel] Missing required parameter \"model_file\"";
+        log()->error("{} Missing required parameter \"model_file\"", logPrefix);
         return false;
     }
 
     if (!YarpUtilities::getVectorFromSearchable(config, "joint_list", jointsList))
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupRobotModel] Missing required parameter \"joint_list\"";
+        log()->error("{} Missing required parameter \"joint_list\"", logPrefix);
         return false;
     }
 
     yarp::os::ResourceFinder& rf = yarp::os::ResourceFinder::getResourceFinderSingleton();
     std::string modelFilePath{rf.findFileByName(modelFileName)};
-    yInfo() << "[FloatingBaseEstimatorDevice][setupRobotModel] Loading model from " << modelFilePath;
+    log()->info("{} Loading model from {}", logPrefix, modelFilePath);
 
     iDynTree::ModelLoader modelLoader;
     if (!modelLoader.loadReducedModelFromFile(modelFilePath, jointsList))
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupRobotModel] Could not load robot model";
+        log()->error("{} Could not load robot model", logPrefix);
         return false;
     }
 
@@ -117,10 +119,12 @@ bool FloatingBaseEstimatorDevice::setupRobotModel(yarp::os::Searchable& config)
 
 bool FloatingBaseEstimatorDevice::setupRobotSensorBridge(yarp::os::Searchable& config)
 {
+    constexpr auto logPrefix = "[FloatingBaseEstimatorDevice::setupRobotSensorBridge]";
+
     auto bridgeConfig = config.findGroup("RobotSensorBridge");
     if (bridgeConfig.isNull())
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupRobotSensorBridge] Missing required group \"RobotSensorBridge\"";
+        log()->error("{} Missing required group \"RobotSensorBridge\"", logPrefix);
         return false;
     }
 
@@ -130,7 +134,7 @@ bool FloatingBaseEstimatorDevice::setupRobotSensorBridge(yarp::os::Searchable& c
     m_robotSensorBridge = std::make_unique<YarpSensorBridge>();
     if (!m_robotSensorBridge->initialize(bridgeHandler))
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupRobotSensorBridge] Could not configure RobotSensorBridge";
+        log()->error("{} Could not configure RobotSensorBridge", logPrefix);
         return false;
     }
 
@@ -139,10 +143,12 @@ bool FloatingBaseEstimatorDevice::setupRobotSensorBridge(yarp::os::Searchable& c
 
 bool FloatingBaseEstimatorDevice::setupFeetContactStateMachines(yarp::os::Searchable& config)
 {
+    constexpr auto logPrefix = "[FloatingBaseEstimatorDevice::setupFeetContactStateMachines]";
+
     auto csmConfig = config.findGroup("ContactSchmittTrigger");
     if (csmConfig.isNull())
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupFeetContactStateMachines] Missing required group \"ContactSchmittTrigger\"";
+        log()->error("{} Missing required group \"ContactSchmittTrigger\"");
         return false;
     }
 
@@ -150,24 +156,24 @@ bool FloatingBaseEstimatorDevice::setupFeetContactStateMachines(yarp::os::Search
     auto lCSMConfig = csmConfig.findGroup("left_foot");
     if (lCSMConfig.isNull())
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupFeetContactStateMachines] Could not load left foot contact Schmitt trigger configuration group.";
+        log()->error("{} Could not load left foot contact Schmitt trigger configuration group.", logPrefix);
         return false;
     }
     if (!parseFootSchmittParams(lCSMConfig, lParams))
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupFeetContactStateMachines] Could not load left foot contact Schmitt trigger parameters";
+        log()->error("{} Could not load left foot contact Schmitt trigger parameters", logPrefix);
         return false;
     }
 
     auto rCSMConfig = csmConfig.findGroup("right_foot");
     if (rCSMConfig.isNull())
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupFeetContactStateMachines] Could not load right foot contact Schmitt trigger configuration group.";
+        log()->error("{} Could not load right foot contact Schmitt trigger configuration group.", logPrefix);
         return false;
     }
     if (!parseFootSchmittParams(rCSMConfig, rParams))
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupFeetContactStateMachines] Could not load right foot contact Schmitt trigger parameters";
+        log()->error("{} Could not load right foot contact Schmitt trigger parameters", logPrefix);
         return false;
     }
 
@@ -190,9 +196,11 @@ bool FloatingBaseEstimatorDevice::parseFootSchmittParams(yarp::os::Searchable& c
 
 bool FloatingBaseEstimatorDevice::setupBaseEstimator(yarp::os::Searchable& config)
 {
+    constexpr auto logPrefix = "[FloatingBaseEstimatorDevice::setupBaseEstimator]";
+
     if (!YarpUtilities::getElementFromSearchable(config, "estimator_type", m_estimatorType))
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupRobotModel] Missing required parameter \"estimator_type\"";
+        log()->error("{} Missing required parameter \"estimator_type\"", logPrefix);
         return false;
     }
 
@@ -209,7 +217,7 @@ bool FloatingBaseEstimatorDevice::setupBaseEstimator(yarp::os::Searchable& confi
     m_kinDyn->loadRobotModel(m_model);
     if (!m_estimator->initialize(parameterHandler, m_kinDyn))
     {
-        yError() << "[FloatingBaseEstimatorDevice][setupRobotModel] Could not configure estimator";
+        log()->error("{} Could not configure estimator", logPrefix);
         return false;
     }
     return true;
@@ -217,15 +225,17 @@ bool FloatingBaseEstimatorDevice::setupBaseEstimator(yarp::os::Searchable& confi
 
 bool FloatingBaseEstimatorDevice::attachAll(const yarp::dev::PolyDriverList & poly)
 {
+    constexpr auto logPrefix = "[FloatingBaseEstimatorDevice::attachAll]";
+
     if (!m_robotSensorBridge->setDriversList(poly))
     {
-        yError() << "[FloatingBaseEstimatorDevice][attachAll] Failed to attach to devices through RobotSensorBridge.";
+        log()->error("{} Failed to attach to devices through RobotSensorBridge.", logPrefix);
         return false;
     }
 
     if (!openCommunications())
     {
-        yError() << "[FloatingBaseEstimatorDevice][attachAll] Could not open ports for publishing outputs.";
+        log()->error("{} Could not open ports for publishing outputs.", logPrefix);
         return false;
     }
 
@@ -249,11 +259,12 @@ bool FloatingBaseEstimatorDevice::openBufferedSigPort(yarp::os::BufferedPort<yar
                                                       const std::string& portPrefix,
                                                       const std::string& address)
 {
+    constexpr auto logPrefix = "[FloatingBaseEstimatorDevice::openBufferedSigPort]";
     bool ok{false};
     ok = port.open(portPrefix + address);
     if (!ok)
     {
-        yError() << "[FloatingBaseEstimatorDevice][openBufferedSigPort] error opening port " << portPrefix + address;
+        log()->error("{} error opening port {}.", logPrefix, portPrefix + address);
         return false;
     }
     return true;
@@ -261,24 +272,26 @@ bool FloatingBaseEstimatorDevice::openBufferedSigPort(yarp::os::BufferedPort<yar
 
 void FloatingBaseEstimatorDevice::run()
 {
+    constexpr auto logPrefix = "[FloatingBaseEstimatorDevice::run]";
+
     // advance sensor bridge
     if (!m_robotSensorBridge->advance())
     {
-        yWarning() << "Advance Sensor bridge failed.";
+        log()->warn("{} Advance Sensor bridge failed.", logPrefix);
         return;
     }
 
     // update estimator measurements
     if (!updateMeasurements())
     {
-        yWarning() << "Measurement updates failed.";
+        log()->warn("{} Measurement updates failed.", logPrefix);
         return;
     }
 
     // advance estimator
     if (!m_estimator->advance())
     {
-        yWarning()  << "Advance estimator failed.";
+        log()->warn("{} Advance estimator failed.", logPrefix);
         return;
     }
 
@@ -382,6 +395,8 @@ void FloatingBaseEstimatorDevice::publish()
 
 void FloatingBaseEstimatorDevice::publishBaseLinkState(const FloatingBaseEstimators::Output& estimatorOut)
 {
+    constexpr auto logPrefix = "[FloatingBaseEstimatorDevice::publishBaseLinkState]";
+
     size_t stateVecSize{12};
     size_t rpyOffset{3};
     size_t linVelOffset{6};
@@ -412,7 +427,7 @@ void FloatingBaseEstimatorDevice::publishBaseLinkState(const FloatingBaseEstimat
     {
         if (!m_transformInterface->setTransform("/world", "/base_link", basePoseYARP))
         {
-            yError() << "[FloatingBaseEstimatorDevice] Could not publish measured base pose transform from  primary IMU";
+            log()->error("{} Could not publish measured base pose transform from  primary IMU", logPrefix);
         }
     }
 }
@@ -504,19 +519,20 @@ bool FloatingBaseEstimatorDevice::close()
 
 bool FloatingBaseEstimatorDevice::loadTransformBroadcaster()
 {
+    constexpr auto logPrefix = "[FloatingBaseEstimatorDevice::loadTransformBroadcaster]";
     yarp::os::Property tfBroadcasterSettings{{"device", yarp::os::Value("transformClient")},
                                              {"remote", yarp::os::Value("/transformServer")},
                                              {"local", yarp::os::Value(m_portPrefix + "/transformClient")}};
 
     if (!m_transformBroadcaster.open(tfBroadcasterSettings))
     {
-        yError() << "[FloatingBaseEstimatorDevice][loadTransformBroadcaster] could not open transform broadcaster.";
+        log()->error("{} could not open transform broadcaster.", logPrefix);
         return false;
     }
 
     if (!m_transformBroadcaster.view(m_transformInterface))
     {
-        yError() << "[FloatingBaseEstimatorDevice][loadTransformBroadcaster] could not access transform interface";
+        log()->error("{} could not access transform interface", logPrefix);
         return false;
     }
 
