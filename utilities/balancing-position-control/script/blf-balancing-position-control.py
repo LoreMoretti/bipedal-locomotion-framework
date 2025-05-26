@@ -6,7 +6,7 @@ import time
 import numpy as np
 import datetime
 
-import bipedal_locomotion_framework.bindings as blf
+import bipedal_locomotion_framework as blf
 import yarp
 import idyntree.bindings as idyn
 
@@ -28,8 +28,122 @@ sys.path.extend(
     ]
 )
 
-from balancing_position_control.wbc import WBC
 from datetime import timedelta
+
+# from balancing_position_control.wbc import WBC
+class WBC:
+    def __init__(
+        self,
+        param_handler: blf.parameters_handler.IParametersHandler,
+        kindyn: idyn.KinDynComputations,
+    ):
+        self.solver, self.tasks, self.variables_handler = blf.utils.create_ik(
+            kindyn=kindyn, param_handler=param_handler
+        )
+
+# add a class which implements an admittance controller, with set_input, advance, and get_output methods
+class AdmittanceController:
+    def __init__(self,):
+        self.is_initialized = False
+
+    def initialize(self, param_handler: blf.parameters_handler.IParametersHandler):
+        # parse the parameters from the parameter handler
+        self.kp_gains = param_handler.get_parameter_vector_float("kp_gains")
+        self.kd_gains = param_handler.get_parameter_vector_float("kd_gains")
+        self.gear_ratio = param_handler.get_parameter_vector_float("gear_ratio")
+        self.ktau = param_handler.get_parameter_vector_float("ktau")
+        self.joint_torque_limits = param_handler.get_parameter_vector_float("max_torque")
+       
+        # Check that vector parameters have the same length
+        vector_lengths = [
+            len(self.kp_gains),
+            len(self.kd_gains),
+            len(self.gear_ratio),
+            len(self.ktau),
+            len(self.joint_torque_limits),
+        ]
+
+        if len(set(vector_lengths)) != 1:
+            raise ValueError(f"Vector parameters have mismatched lengths: "
+                            f"kp_gains={len(self.kp_gains)}, "
+                            f"kd_gains={len(self.kd_gains)}, "
+                            f"ktau={len(self.ktau)}, "
+                            f"gear_ratio={self.gear_ratio}, "
+                            f"joint_torque_limits={len(self.joint_torque_limits)}")
+        
+        # convert to numpy arrays
+        self.kp_gains = np.array(self.kp_gains, dtype=np.float64)
+        self.kd_gains = np.array(self.kd_gains, dtype=np.float64)
+        self.gear_ratio = np.array(self.gear_ratio, dtype=np.float64)
+        self.ktau = np.array(self.ktau, dtype=np.float64)
+        self.joint_torque_limits = np.array(self.joint_torque_limits, dtype=np.float64)
+        
+        self.is_initialized = True
+
+        # initialize the input/output
+        self.joints_desired_position = np.zeros(len(self.kp_gains))
+        self.joints_position = np.zeros(len(self.kp_gains))
+        self.joints_velocity = np.zeros(len(self.kp_gains))
+        self.joints_torque = np.zeros(len(self.kp_gains))
+        self.motor_current = np.zeros(len(self.kp_gains))
+
+
+    def set_input(self, joints_position: np.ndarray, joints_velocity: np.ndarray, joints_desired_position: np.ndarray):
+        
+        # check is_initialized
+        if not self.is_initialized:
+            raise RuntimeError("AdmittanceController is not initialized. Call initialize() first.")
+
+        # check inputs are all the same size
+        if (len(joints_position) != len(joints_velocity) or
+            len(joints_position) != len(joints_desired_position) or
+            len(joints_velocity) != len(joints_desired_position)):
+            raise ValueError("Input arrays must have the same length")
+        
+        # check that they are the same size as the gains
+        if (len(joints_position) != len(self.kp_gains)):
+            raise ValueError("Input arrays must have the same length as the gains")
+        
+        self.joints_position = joints_position
+        self.joints_velocity = joints_velocity
+        self.joints_desired_position = joints_desired_position
+
+    def advance(self):
+
+        # check is_initialized
+        if not self.is_initialized:
+            raise RuntimeError("AdmittanceController is not initialized. Call initialize() first.")
+        
+        # compute control law
+        self.joints_torque = (
+            self.kp_gains * (self.joints_desired_position - self.joints_position)
+            - self.kd_gains * self.joints_velocity *0
+        )
+
+        # Apply limit to the torque
+        self.joints_torque = np.clip(
+            self.joints_torque,
+            -np.abs(self.joint_torque_limits),
+            np.abs(self.joint_torque_limits)
+)
+
+        self.current = self.joints_torque / (self.gear_ratio * self.ktau)
+        
+    def get_motor_current(self) -> np.ndarray:
+        
+        # check is_initialized
+        if not self.is_initialized:
+            raise RuntimeError("AdmittanceController is not initialized. Call initialize() first.")
+        
+        return self.motor_current.copy()
+    
+    def get_joint_torque(self) -> np.ndarray:
+        
+        # check is_initialized
+        if not self.is_initialized:
+            raise RuntimeError("AdmittanceController is not initialized. Call initialize() first.")
+        
+        return self.joints_torque.copy()
 
 
 def build_remote_control_board_driver(
@@ -172,6 +286,14 @@ def main():
         raise RuntimeError("Unable to initialize the robot control")
     if not robot_control.set_driver(poly_drivers["REMOTE_CONTROL_BOARD"].poly):
         raise RuntimeError("Unable to set the driver for the robot control")
+    
+    # get robot name
+    robot_name = param_handler.get_group("ROBOT_CONTROL").get_parameter_string("robot_name")
+    
+    if robot_name == "ergocubSim":
+        is_simulation = True
+    else:
+        is_simulation = False
 
     # Create the sensor bridge
     sensor_bridge = blf.robot_interface.YarpSensorBridge()
@@ -232,6 +354,12 @@ def main():
             param_handler.get_group("COM_ZMP_CONTROLLER")
         ):
             raise RuntimeError("Unable to initialize the zmp-com controller")
+        
+    # create and initialize the admittance controller
+    admittance_controller = AdmittanceController()
+    admittance_controller.initialize(
+        param_handler.get_group("ADMITTANCE_CONTROL")
+    )
 
     # create and initialize the IK
     ik = WBC(param_handler=param_handler.get_group("IK"), kindyn=kindyn)
@@ -337,238 +465,274 @@ def main():
     vectors_collection_server.finalize_metadata()
 
     # switch to position direct
-    robot_control.set_control_mode(blf.robot_interface.YarpRobotControl.PositionDirect)
+    # robot_control.set_control_mode(blf.robot_interface.YarpRobotControl.PositionDirect)
+
 
     blf.log().info("Starting the balancing controller. Waiting for your input")
     blf.log().info("Press enter to start the balancing controller")
     input()
     blf.log().info("Starting the balancing controller")
 
-    while True:
-        tic = blf.clock().now()
 
-        # get the feedback
-        if not sensor_bridge.advance():
-            raise RuntimeError("Unable to advance the sensor bridge")
-        are_joints_ok, joint_positions, _ = sensor_bridge.get_joint_positions()
-        if not are_joints_ok:
-            raise RuntimeError("Unable to get the joint positions")
+    # switch to current control mode
+    if is_simulation:
+        control_mode = blf.robot_interface.YarpRobotControl.Torque
+    else:
+        control_mode = blf.robot_interface.YarpRobotControl.Current
+    robot_control.set_control_mode(control_mode)
 
-        are_joints_ok, joint_velocities, _ = sensor_bridge.get_joint_velocities()
-        if not are_joints_ok:
-            raise RuntimeError("Unable to get the joint velocities")
+    try:
+        while True:
+            tic = blf.clock().now()
 
-        if not kindyn.setRobotState(
-            frame_T_link,
-            desired_joint_positions,
-            base_velocity,
-            desired_joint_velocities,
-            gravity,
-        ):
-            raise RuntimeError("Unable to set the robot state")
-        if not kindyn_with_measured.setRobotState(
-            frame_T_link, joint_positions, base_velocity, joint_velocities, gravity
-        ):
-            raise RuntimeError("Unable to set the robot state")
+            # get the feedback
+            if not sensor_bridge.advance():
+                raise RuntimeError("Unable to advance the sensor bridge")
+            are_joints_ok, joint_positions, _ = sensor_bridge.get_joint_positions()
+            if not are_joints_ok:
+                raise RuntimeError("Unable to get the joint positions")
 
-        left_wrench = np.zeros(6)
-        for cartesian_wrench_name in contact_wrenches_names["left_foot"]:
-            _, wrench, _ = sensor_bridge.get_cartesian_wrench(cartesian_wrench_name)
-            left_wrench += wrench
+            are_joints_ok, joint_velocities, _ = sensor_bridge.get_joint_velocities()
+            if not are_joints_ok:
+                raise RuntimeError("Unable to get the joint velocities")
 
-        right_wrench = np.zeros(6)
-        for cartesian_wrench_name in contact_wrenches_names["right_foot"]:
-            _, wrench, _ = sensor_bridge.get_cartesian_wrench(cartesian_wrench_name)
-            right_wrench += wrench
+            if not kindyn.setRobotState(
+                frame_T_link,
+                desired_joint_positions,
+                base_velocity,
+                desired_joint_velocities,
+                gravity,
+            ):
+                raise RuntimeError("Unable to set the robot state")
+            if not kindyn_with_measured.setRobotState(
+                frame_T_link, joint_positions, base_velocity, joint_velocities, gravity
+            ):
+                raise RuntimeError("Unable to set the robot state")
 
-        # evaluate the global CoP using the desired joint state
-        left_contact = blf.contacts.ContactWrench()
-        left_contact.wrench = left_wrench
-        left_contact.pose = blf.conversions.to_manif_pose(
-            kindyn.getWorldTransform(left_contact_frame)
-        )
-        right_contact = blf.contacts.ContactWrench()
-        right_contact.wrench = right_wrench
-        right_contact.pose = blf.conversions.to_manif_pose(
-            kindyn.getWorldTransform(right_contact_frame)
-        )
+            left_wrench = np.zeros(6)
+            for cartesian_wrench_name in contact_wrenches_names["left_foot"]:
+                _, wrench, _ = sensor_bridge.get_cartesian_wrench(cartesian_wrench_name)
+                left_wrench += wrench
 
-        if not global_cop_evaluator.set_input([left_contact, right_contact]):
-            raise RuntimeError("Unable to set the input for the global cop evaluator")
-        if not global_cop_evaluator.advance():
-            raise RuntimeError("Unable to advance the global cop evaluator")
-        global_zmp = global_cop_evaluator.get_output()
+            right_wrench = np.zeros(6)
+            for cartesian_wrench_name in contact_wrenches_names["right_foot"]:
+                _, wrench, _ = sensor_bridge.get_cartesian_wrench(cartesian_wrench_name)
+                right_wrench += wrench
 
-        # evaluate the global CoP using the measured joint state
-        left_contact = blf.contacts.ContactWrench()
-        left_contact.wrench = left_wrench
-        left_contact.pose = blf.conversions.to_manif_pose(
-            kindyn_with_measured.getWorldTransform(left_contact_frame)
-        )
-        right_contact = blf.contacts.ContactWrench()
-        right_contact.wrench = right_wrench
-        right_contact.pose = blf.conversions.to_manif_pose(
-            kindyn_with_measured.getWorldTransform(right_contact_frame)
-        )
-        if not global_cop_evaluator.set_input([left_contact, right_contact]):
-            raise RuntimeError("Unable to set the input for the global cop evaluator")
-        if not global_cop_evaluator.advance():
-            raise RuntimeError("Unable to advance the global cop evaluator")
-        global_zmp_from_measured = global_cop_evaluator.get_output()
-
-        # use the CoM-ZMP controller
-        if not spline.advance():
-            raise RuntimeError("Unable to advance the spline")
-
-        com_spline_output = spline.get_output()
-        # evaluate the desired ZMP using the LIP model
-        # ddx_com = omega^2 * (x_com - x_zmp)
-        desired_zmp = (
-            com_spline_output.position[:2]
-            - com_spline_output.acceleration[:2] / lipm_omega_square
-        )
-        desired_zmp = np.append(desired_zmp, 0.0)
-
-        # set the desired ZMP and the feedback if close_loop_with_zmp is true
-        if close_loop_with_zmp:
-            com_zmp_controller.set_set_point(
-                com_spline_output.velocity[:2],
-                com_spline_output.position[:2],
-                desired_zmp[:2],
+            # evaluate the global CoP using the desired joint state
+            left_contact = blf.contacts.ContactWrench()
+            left_contact.wrench = left_wrench
+            left_contact.pose = blf.conversions.to_manif_pose(
+                kindyn.getWorldTransform(left_contact_frame)
             )
-            com_zmp_controller.set_feedback(
-                kindyn_with_measured.getCenterOfMassPosition().toNumPy()[:2],
-                global_zmp_from_measured[:2],
-                0,
-            )
-            if not com_zmp_controller.advance():
-                raise RuntimeError("Unable to advance the CoM-ZMP controller")
-
-        # evaluate the desired CoM position
-        if close_loop_with_zmp:
-            desired_com_velocity = np.append(
-                com_zmp_controller.get_output(), com_spline_output.velocity[2]
-            )
-            desired_com_position[0:2] += (
-                com_zmp_controller.get_output() * dt.total_seconds()
-            )
-            desired_com_position[2] = com_spline_output.position[2]
-        else:
-            desired_com_velocity = com_spline_output.velocity
-            desired_com_position = com_spline_output.position
-
-        # solve the IK
-        if not ik.tasks["com_task"].set_set_point(
-            desired_com_position, desired_com_velocity
-        ):
-            raise RuntimeError("Unable to set the set point for the com task")
-        if not ik.solver.advance():
-            raise RuntimeError("Unable to advance the solver")
-        if not ik.solver.is_output_valid():
-            raise RuntimeError("The solver output is not valid")
-
-        # integrate the system
-        desired_joint_positions += (
-            ik.solver.get_output().joint_velocity * dt.total_seconds()
-        )
-        desired_joint_velocities = ik.solver.get_output().joint_velocity
-
-        # send the joint pose
-        if not robot_control.set_references(
-            desired_joint_positions,
-            blf.robot_interface.YarpRobotControl.PositionDirect,
-            joint_positions,
-        ):
-            raise RuntimeError("Unable to set the references")
-
-        left_wrench = blf.math.Wrenchd(left_wrench)
-        local_zmp_left = left_wrench.get_local_cop()
-        right_wrench = blf.math.Wrenchd(right_wrench)
-        local_zmp_right = right_wrench.get_local_cop()
-
-        com_from_desired = kindyn.getCenterOfMassPosition().toNumPy()
-        com_from_measured = kindyn_with_measured.getCenterOfMassPosition().toNumPy()
-
-        vectors_collection_server.prepare_data()
-        vectors_collection_server.clear_data()
-
-        vectors_collection_server.populate_data("zmp::desired_planner", desired_zmp)
-        vectors_collection_server.populate_data(
-            "zmp::measured::global::with_joint_desired", global_zmp
-        )
-        vectors_collection_server.populate_data(
-            "zmp::measured::global::with_joint_measured", global_zmp_from_measured
-        )
-        vectors_collection_server.populate_data(
-            "zmp::measured::local::left", local_zmp_left
-        )
-        vectors_collection_server.populate_data(
-            "zmp::measured::local::right", local_zmp_right
-        )
-        vectors_collection_server.populate_data(
-            "com::measured::with_joint_desired", com_from_desired
-        )
-        vectors_collection_server.populate_data(
-            "com::measured::with_joint_measured", com_from_measured
-        )
-        vectors_collection_server.populate_data(
-            "com::planned::position", com_spline_output.position
-        )
-        vectors_collection_server.populate_data(
-            "com::planned::velocity", com_spline_output.velocity
-        )
-        vectors_collection_server.populate_data(
-            "com::planned::acceleration", com_spline_output.acceleration
-        )
-        vectors_collection_server.populate_data(
-            "com::com_zmp::position", desired_com_position
-        )
-        vectors_collection_server.populate_data(
-            "com::com_zmp::velocity", desired_com_velocity
-        )
-        vectors_collection_server.populate_data(
-            "joints::desired::position", desired_joint_positions
-        )
-
-        vectors_collection_server.send_data()
-
-        if index * dt >= motion_duration + motion_timeout:
-            if knot_index + 1 >= len(com_knots_delta_x):
-                blf.log().info("Motion completed. Closing.")
-                break
-
-            spline = create_new_spline(
-                [
-                    initial_com_position
-                    + np.array(
-                        [
-                            com_knots_delta_x[knot_index],
-                            com_knots_delta_y[knot_index],
-                            com_knots_delta_z[knot_index],
-                        ]
-                    ),
-                    initial_com_position
-                    + np.array(
-                        [
-                            com_knots_delta_x[knot_index + 1],
-                            com_knots_delta_y[knot_index + 1],
-                            com_knots_delta_z[knot_index + 1],
-                        ]
-                    ),
-                ],
-                motion_duration,
-                dt,
+            right_contact = blf.contacts.ContactWrench()
+            right_contact.wrench = right_wrench
+            right_contact.pose = blf.conversions.to_manif_pose(
+                kindyn.getWorldTransform(right_contact_frame)
             )
 
-            knot_index += 1
-            index = 0
-        else:
-            index += 1
+            if not global_cop_evaluator.set_input([left_contact, right_contact]):
+                raise RuntimeError("Unable to set the input for the global cop evaluator")
+            if not global_cop_evaluator.advance():
+                raise RuntimeError("Unable to advance the global cop evaluator")
+            global_zmp = global_cop_evaluator.get_output()
 
-        toc = blf.clock().now()
-        delta_time = toc - tic
-        if delta_time < dt:
-            blf.clock().sleep_for(dt - delta_time)
+            # evaluate the global CoP using the measured joint state
+            left_contact = blf.contacts.ContactWrench()
+            left_contact.wrench = left_wrench
+            left_contact.pose = blf.conversions.to_manif_pose(
+                kindyn_with_measured.getWorldTransform(left_contact_frame)
+            )
+            right_contact = blf.contacts.ContactWrench()
+            right_contact.wrench = right_wrench
+            right_contact.pose = blf.conversions.to_manif_pose(
+                kindyn_with_measured.getWorldTransform(right_contact_frame)
+            )
+            if not global_cop_evaluator.set_input([left_contact, right_contact]):
+                raise RuntimeError("Unable to set the input for the global cop evaluator")
+            if not global_cop_evaluator.advance():
+                raise RuntimeError("Unable to advance the global cop evaluator")
+            global_zmp_from_measured = global_cop_evaluator.get_output()
+
+            # use the CoM-ZMP controller
+            if not spline.advance():
+                raise RuntimeError("Unable to advance the spline")
+
+            com_spline_output = spline.get_output()
+            # evaluate the desired ZMP using the LIP model
+            # ddx_com = omega^2 * (x_com - x_zmp)
+            desired_zmp = (
+                com_spline_output.position[:2]
+                - com_spline_output.acceleration[:2] / lipm_omega_square
+            )
+            desired_zmp = np.append(desired_zmp, 0.0)
+
+            # set the desired ZMP and the feedback if close_loop_with_zmp is true
+            if close_loop_with_zmp:
+                com_zmp_controller.set_set_point(
+                    com_spline_output.velocity[:2],
+                    com_spline_output.position[:2],
+                    desired_zmp[:2],
+                )
+                com_zmp_controller.set_feedback(
+                    kindyn_with_measured.getCenterOfMassPosition().toNumPy()[:2],
+                    global_zmp_from_measured[:2],
+                    0,
+                )
+                if not com_zmp_controller.advance():
+                    raise RuntimeError("Unable to advance the CoM-ZMP controller")
+
+            # evaluate the desired CoM position
+            if close_loop_with_zmp:
+                desired_com_velocity = np.append(
+                    com_zmp_controller.get_output(), com_spline_output.velocity[2]
+                )
+                desired_com_position[0:2] += (
+                    com_zmp_controller.get_output() * dt.total_seconds()
+                )
+                desired_com_position[2] = com_spline_output.position[2]
+            else:
+                desired_com_velocity = com_spline_output.velocity
+                desired_com_position = com_spline_output.position
+
+            # solve the IK
+            if not ik.tasks["com_task"].set_set_point(
+                desired_com_position, desired_com_velocity
+            ):
+                raise RuntimeError("Unable to set the set point for the com task")
+            if not ik.solver.advance():
+                raise RuntimeError("Unable to advance the solver")
+            if not ik.solver.is_output_valid():
+                raise RuntimeError("The solver output is not valid")
+
+            # integrate the system
+            desired_joint_positions += (
+                ik.solver.get_output().joint_velocity * dt.total_seconds()
+            )
+            desired_joint_velocities = ik.solver.get_output().joint_velocity
+
+            # admittance controller
+            admittance_controller.set_input(
+                joint_positions, joint_velocities, desired_joint_positions
+            )
+            admittance_controller.advance()
+            if is_simulation:
+                desired_control_signal = admittance_controller.get_joint_torque()
+            else:
+                desired_control_signal = admittance_controller.get_motor_current()
+
+            # # send the joint pose
+            # if not robot_control.set_references(
+            #     desired_joint_positions,
+            #     blf.robot_interface.YarpRobotControl.PositionDirect,
+            #     joint_positions,
+            # ):
+            #     raise RuntimeError("Unable to set the references")
+
+            # send the motor current
+            if not robot_control.set_references(
+                desired_control_signal,
+                control_mode,
+                joint_positions,
+            ):
+                raise RuntimeError("Unable to set the references")
+
+            left_wrench = blf.math.Wrenchd(left_wrench)
+            local_zmp_left = left_wrench.get_local_cop()
+            right_wrench = blf.math.Wrenchd(right_wrench)
+            local_zmp_right = right_wrench.get_local_cop()
+
+            com_from_desired = kindyn.getCenterOfMassPosition().toNumPy()
+            com_from_measured = kindyn_with_measured.getCenterOfMassPosition().toNumPy()
+
+            vectors_collection_server.prepare_data()
+            vectors_collection_server.clear_data()
+
+            vectors_collection_server.populate_data("zmp::desired_planner", desired_zmp)
+            vectors_collection_server.populate_data(
+                "zmp::measured::global::with_joint_desired", global_zmp
+            )
+            vectors_collection_server.populate_data(
+                "zmp::measured::global::with_joint_measured", global_zmp_from_measured
+            )
+            vectors_collection_server.populate_data(
+                "zmp::measured::local::left", local_zmp_left
+            )
+            vectors_collection_server.populate_data(
+                "zmp::measured::local::right", local_zmp_right
+            )
+            vectors_collection_server.populate_data(
+                "com::measured::with_joint_desired", com_from_desired
+            )
+            vectors_collection_server.populate_data(
+                "com::measured::with_joint_measured", com_from_measured
+            )
+            vectors_collection_server.populate_data(
+                "com::planned::position", com_spline_output.position
+            )
+            vectors_collection_server.populate_data(
+                "com::planned::velocity", com_spline_output.velocity
+            )
+            vectors_collection_server.populate_data(
+                "com::planned::acceleration", com_spline_output.acceleration
+            )
+            vectors_collection_server.populate_data(
+                "com::com_zmp::position", desired_com_position
+            )
+            vectors_collection_server.populate_data(
+                "com::com_zmp::velocity", desired_com_velocity
+            )
+            vectors_collection_server.populate_data(
+                "joints::desired::position", desired_joint_positions
+            )
+
+            vectors_collection_server.send_data()
+
+            if index * dt >= motion_duration + motion_timeout:
+                if knot_index + 1 >= len(com_knots_delta_x):
+                    blf.log().info("Motion completed. Closing.")
+                    break
+
+                spline = create_new_spline(
+                    [
+                        initial_com_position
+                        + np.array(
+                            [
+                                com_knots_delta_x[knot_index],
+                                com_knots_delta_y[knot_index],
+                                com_knots_delta_z[knot_index],
+                            ]
+                        ),
+                        initial_com_position
+                        + np.array(
+                            [
+                                com_knots_delta_x[knot_index + 1],
+                                com_knots_delta_y[knot_index + 1],
+                                com_knots_delta_z[knot_index + 1],
+                            ]
+                        ),
+                    ],
+                    motion_duration,
+                    dt,
+                )
+
+                knot_index += 1
+                index = 0
+            else:
+                index += 1
+
+            toc = blf.clock().now()
+            delta_time = toc - tic
+            if delta_time < dt:
+                blf.clock().sleep_for(dt - delta_time)
+        
+    except KeyboardInterrupt:
+        print("Interrupted by user (Ctrl+C).")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        # switch to position control mode
+        robot_control.set_control_mode(blf.robot_interface.YarpRobotControl.Position)
 
 
 if __name__ == "__main__":
