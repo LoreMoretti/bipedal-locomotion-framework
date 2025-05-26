@@ -7,7 +7,7 @@ BSD-3-Clause license. -->
 
 <robot name="ergoCubGazeboV1_1" portprefix="FloatingBaseEstimator" build="1" xmlns:xi="http://www.w3.org/2001/XInclude">
     <devices>
-        <!-- interface -->
+        <!-- clients -->
         <xi:include href="interface/all_joints_mc.xml" />
         <xi:include href="interface/imu_clients.xml" />
         <xi:include href="interface/wrench_clients.xml" />

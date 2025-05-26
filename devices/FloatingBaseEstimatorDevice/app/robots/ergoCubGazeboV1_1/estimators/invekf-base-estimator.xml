@@ -33,7 +33,7 @@ BSD-3-Clause license. -->
         </group>
 
         <group name="CartesianWrenches">
-            <param name="cartesian_wrenches_list">("right_foot_cartesian_wrench", "left_foot_cartesian_wrench")</param>
+            <param name="cartesian_wrenches_list">(DA MODIFICARE "right_foot_cartesian_wrench", "left_foot_cartesian_wrench")</param>
         </group>
     </group>
 
@@ -118,10 +118,10 @@ BSD-3-Clause license. -->
         <paramlist name="networks">
             <elem name="all_joints">all_joints_mc</elem>
             <elem name="root_link_imu_acc">root_link_imu_acc</elem>
-            <elem name="left_rear_wrench_client">left_rear_wrench_client</elem>
-            <elem name="left_front_wrench_client">left_front_wrench_client</elem>
-            <elem name="right_rear_wrench_client">right_rear_wrench_client</elem>
-            <elem name="right_front_wrench_client">right_front_wrench_client</elem>
+            <elem name="left_foot_rear_wrench">left_foot_rear_wrench_client</elem>
+            <elem name="left_foot_front_wrench">left_foot_front_wrench_client</elem>
+            <elem name="right_foot_rear_wrench">right_foot_rear_wrench_client</elem>
+            <elem name="right_foot_front_wrench">right_foot_front_wrench_client</elem>
         </paramlist>
     </action>
 

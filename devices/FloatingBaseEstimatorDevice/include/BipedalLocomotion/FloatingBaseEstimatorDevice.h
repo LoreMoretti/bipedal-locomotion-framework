@@ -80,16 +80,25 @@ private:
     std::shared_ptr<iDynTree::KinDynComputations> m_kinDyn;
     std::unique_ptr<BipedalLocomotion::RobotInterface::YarpSensorBridge> m_robotSensorBridge;
     std::unique_ptr<BipedalLocomotion::Estimators::FloatingBaseEstimator> m_estimator;
-    std::unique_ptr<iDynTree::ContactStateMachine> m_lFootCSM, m_rFootCSM;
-    bool m_currentlFootState{false}, m_currentrFootState{false};
-    double m_currentlContactNormal{0.0}, m_currentrContactNormal{0.0};
+    std::unique_ptr<iDynTree::ContactStateMachine> m_leftFootCSM, m_rightFootCSM;
+    bool m_currentLeftFootState{false}, m_currentRightFootState{false};
+    double m_currentLeftContactNormal{0.0}, m_currentRightContactNormal{0.0};
     std::mutex m_deviceMutex;
     std::string m_portPrefix{"/base-estimator"};
     std::string m_robot{"icubSim"};
     std::string m_estimatorType{"InvEKF"};
     std::string m_baseLinkImuName{"root_link_imu_acc"};
-    std::string m_leftFootWrenchName{"left_foot_cartesian_wrench"};
-    std::string m_rightFootWrenchName{"right_foot_cartesian_wrench"};
+
+    struct LeftFootWrenchNames {
+        std::string front{"left_foot_front_wrench"};
+        std::string rear{"left_foot_rear_wrench"};
+    };
+    LeftFootWrenchNames m_leftFootWrenchNames;
+    struct RightFootWrenchNames {
+        std::string front{"right_foot_front_wrench"};
+        std::string rear{"right_foot_rear_wrench"};
+    };
+    RightFootWrenchNames m_rightFootWrenchNames;
 
     yarp::dev::PolyDriver m_transformBroadcaster;
     yarp::dev::IFrameTransform* m_transformInterface{nullptr};

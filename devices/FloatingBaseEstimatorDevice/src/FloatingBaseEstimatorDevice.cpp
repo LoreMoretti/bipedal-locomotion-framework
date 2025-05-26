@@ -5,6 +5,7 @@
  * distributed under the terms of the BSD-3-Clause license.
  */
 
+#include <BipedalLocomotion/Math/Wrench.h>
 #include <BipedalLocomotion/FloatingBaseEstimatorDevice.h>
 #include <BipedalLocomotion/YarpUtilities/Helper.h>
 
@@ -39,8 +40,10 @@ bool FloatingBaseEstimatorDevice::open(yarp::os::Searchable& config)
     YarpUtilities::getElementFromSearchable(config, "robot", m_robot);
     YarpUtilities::getElementFromSearchable(config, "port_prefix", m_portPrefix);
     YarpUtilities::getElementFromSearchable(config, "base_link_imu", m_baseLinkImuName);
-    YarpUtilities::getElementFromSearchable(config, "left_foot_wrench", m_leftFootWrenchName);
-    YarpUtilities::getElementFromSearchable(config, "right_foot_wrench", m_rightFootWrenchName);
+    YarpUtilities::getElementFromSearchable(config, "left_foot_front_wrench", m_leftFootWrenchNames.front);
+    YarpUtilities::getElementFromSearchable(config, "left_foot_rear_wrench", m_leftFootWrenchNames.rear);
+    YarpUtilities::getElementFromSearchable(config, "right_foot_front_wrench", m_rightFootWrenchNames.front);
+    YarpUtilities::getElementFromSearchable(config, "right_foot_rear_wrench", m_rightFootWrenchNames.rear);
     double devicePeriod{0.01};
 
     if (YarpUtilities::getElementFromSearchable(config, "sampling_period_in_s", devicePeriod))
@@ -177,8 +180,8 @@ bool FloatingBaseEstimatorDevice::setupFeetContactStateMachines(yarp::os::Search
         return false;
     }
 
-    m_lFootCSM = std::make_unique<iDynTree::ContactStateMachine>(lParams);
-    m_rFootCSM = std::make_unique<iDynTree::ContactStateMachine>(rParams);
+    m_leftFootCSM = std::make_unique<iDynTree::ContactStateMachine>(lParams);
+    m_rightFootCSM = std::make_unique<iDynTree::ContactStateMachine>(rParams);
 
     return true;
 }
@@ -329,21 +332,24 @@ bool FloatingBaseEstimatorDevice::updateInertialBuffers()
 
 bool FloatingBaseEstimatorDevice::updateContactStates()
 {
-    Eigen::Matrix<double, 6, 1> lfWrench, rfWrench;
+    BipedalLocomotion::Math::Wrenchd leftFootFrontWrench, leftFootRearWrench, rightFootFrontWrench, rightFootRearWrench;
     double lfTimeStamp, rfTimeStamp;
     bool ok{true};
-    ok = ok && m_robotSensorBridge->getCartesianWrench(m_leftFootWrenchName, lfWrench, lfTimeStamp);
+    ok = ok && m_robotSensorBridge->getCartesianWrench(m_leftFootWrenchNames.front, leftFootFrontWrench, lfTimeStamp);
+    ok = ok && m_robotSensorBridge->getCartesianWrench(m_leftFootWrenchNames.rear, leftFootRearWrench, lfTimeStamp);
     if (ok)
     {
-        m_currentlContactNormal = lfWrench(2);
-        m_lFootCSM->contactMeasurementUpdate(lfTimeStamp, lfWrench(2)); // fz
+        m_currentLeftContactNormal = leftFootFrontWrench.force().z() + leftFootRearWrench.force().z();
+        m_leftFootCSM->contactMeasurementUpdate(lfTimeStamp, m_currentLeftContactNormal); // fz
     }
 
-    ok = ok && m_robotSensorBridge->getCartesianWrench(m_rightFootWrenchName, rfWrench, rfTimeStamp);
+    ok = ok && m_robotSensorBridge->getCartesianWrench(m_rightFootWrenchNames.front, rightFootFrontWrench, rfTimeStamp);
+    ok = ok && m_robotSensorBridge->getCartesianWrench(m_rightFootWrenchNames.rear, rightFootRearWrench, rfTimeStamp);
+
     if (ok)
     {
-        m_currentrContactNormal = rfWrench(2);
-        m_rFootCSM->contactMeasurementUpdate(rfTimeStamp, rfWrench(2)); // fz
+        m_currentRightContactNormal = rightFootFrontWrench.force().z() + rightFootRearWrench.force().z();
+        m_rightFootCSM->contactMeasurementUpdate(rfTimeStamp, m_currentRightContactNormal); // fz
     }
 
     if (!ok)
@@ -351,9 +357,9 @@ bool FloatingBaseEstimatorDevice::updateContactStates()
         return false;
     }
 
-    m_currentlFootState = m_lFootCSM->contactState();
-    m_currentrFootState = m_rFootCSM->contactState();
-    if (!m_estimator->setContacts(m_currentlFootState, m_currentrFootState))
+    m_currentRightFootState = m_leftFootCSM->contactState();
+    m_currentRightFootState = m_rightFootCSM->contactState();
+    if (!m_estimator->setContacts(m_currentLeftFootState, m_currentRightFootState))
     {
         return false;
     }
@@ -472,10 +478,10 @@ void FloatingBaseEstimatorDevice::publishFootContactStatesAndNormalForces()
 
     contactVec.resize(4);
     const int scaling_const_for_visualization{300};
-    contactVec(0) = scaling_const_for_visualization*static_cast<int>(m_currentlFootState);
-    contactVec(1) = scaling_const_for_visualization*static_cast<int>(m_currentrFootState);
-    contactVec(2) = m_currentlContactNormal;
-    contactVec(3) = m_currentrContactNormal;
+    contactVec(0) = scaling_const_for_visualization*static_cast<int>(m_currentLeftFootState);
+    contactVec(1) = scaling_const_for_visualization*static_cast<int>(m_currentRightFootState);
+    contactVec(2) = m_currentLeftContactNormal;
+    contactVec(3) = m_currentRightContactNormal;
     m_comms.contactStatePort.write();
 }
 
