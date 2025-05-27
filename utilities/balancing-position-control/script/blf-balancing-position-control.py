@@ -213,8 +213,17 @@ def build_kin_dyn(param_handler):
     joint_list = param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_string(
         "joints_list"
     )
+    fixed_joint_list = param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_string(
+        "fixed_joints_list"
+    )
+    fixed_joint_position = param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_float(
+        "fixed_joints_position"
+    )
+    fixed_joint_position = [angle * np.pi/180 for angle in fixed_joint_position]
+    # create map of fixed joints
+    fixed_joints_map = dict(zip(fixed_joint_list, fixed_joint_position))
     ml = idyn.ModelLoader()
-    ml.loadReducedModelFromFile(robot_model_path, joint_list)
+    ml.loadReducedModelFromFile(robot_model_path, joint_list, fixed_joints_map)
 
     kindyn = idyn.KinDynComputations()
     kindyn.loadRobotModel(ml.model())
