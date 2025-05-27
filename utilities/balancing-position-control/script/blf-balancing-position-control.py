@@ -538,9 +538,11 @@ def main():
             )
 
             if not global_cop_evaluator.set_input([left_contact, right_contact]):
-                raise RuntimeError("Unable to set the input for the global cop evaluator")
-            if not global_cop_evaluator.advance():
-                raise RuntimeError("Unable to advance the global cop evaluator")
+                pass
+                # raise RuntimeError("Unable to set the input for the global cop evaluator")
+            # if not global_cop_evaluator.advance():
+            #     pass
+                # raise RuntimeError("Unable to advance the global cop evaluator")
             global_zmp = global_cop_evaluator.get_output()
 
             # evaluate the global CoP using the measured joint state
@@ -555,9 +557,11 @@ def main():
                 kindyn_with_measured.getWorldTransform(right_contact_frame)
             )
             if not global_cop_evaluator.set_input([left_contact, right_contact]):
-                raise RuntimeError("Unable to set the input for the global cop evaluator")
-            if not global_cop_evaluator.advance():
-                raise RuntimeError("Unable to advance the global cop evaluator")
+                pass
+                # raise RuntimeError("Unable to set the input for the global cop evaluator")
+            # if not global_cop_evaluator.advance():
+            #     pass
+                # raise RuntimeError("Unable to advance the global cop evaluator")
             global_zmp_from_measured = global_cop_evaluator.get_output()
 
             # use the CoM-ZMP controller
