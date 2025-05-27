@@ -6,12 +6,14 @@ BSD-3-Clause license. -->
 <device  xmlns:xi="http://www.w3.org/2001/XInclude" name="base-estimator" type="FloatingBaseEstimatorDevice">
     <param name="robot">ergocubSim</param>
     <param name="sampling_period_in_s">0.01</param>
-    <param name="port_prefix">/base-estimator</param>
+    <param name="port_prefix">/floating-base-estimator</param>
     <param name="model_file">model.urdf</param>
     <param name="joint_list">("neck_pitch", "neck_roll", "neck_yaw", "torso_pitch", "torso_roll", "torso_yaw", "l_shoulder_pitch", "l_shoulder_roll", "l_shoulder_yaw", "l_elbow", "r_shoulder_pitch", "r_shoulder_roll", "r_shoulder_yaw", "r_elbow", "l_hip_pitch", "l_hip_roll", "l_hip_yaw", "l_knee", "l_ankle_pitch", "l_ankle_roll", "r_hip_pitch", "r_hip_roll", "r_hip_yaw", "r_knee", "r_ankle_pitch", "r_ankle_roll")</param>
     <param name="base_link_imu">waist_imu_0</param>
-    <param name="left_foot_wrench">left_foot_cartesian_wrench</param>
-    <param name="right_foot_wrench">right_foot_cartesian_wrench</param>
+    <param name="left_foot_front_wrench">left_foot_front_wrench_client</param>
+    <param name="left_foot_rear_wrench">left_foot_rear_wrench_client</param>
+    <param name="right_foot_front_wrench">right_foot_front_wrench_client</param>
+    <param name="right_foot_rear_wrench">right_foot_rear_wrench_client</param>
     <param name="estimator_type">InvEKF</param>
 
 
@@ -21,19 +23,20 @@ BSD-3-Clause license. -->
         <param name="stream_joint_accelerations">false</param>
         <param name="stream_inertials">true</param>
         <param name="stream_cartesian_wrenches">true</param>
-        <param name="stream_forcetorque_sensors">true</param>
-        <param name="stream_cameras">true</param>
 
         <group name="RemoteControlBoardRemapper">
             <param name="joints_list">("neck_pitch", "neck_roll", "neck_yaw", "torso_pitch", "torso_roll", "torso_yaw", "l_shoulder_pitch", "l_shoulder_roll", "l_shoulder_yaw", "l_elbow", "r_shoulder_pitch", "r_shoulder_roll", "r_shoulder_yaw", "r_elbow", "l_hip_pitch", "l_hip_roll", "l_hip_yaw", "l_knee", "l_ankle_pitch", "l_ankle_roll", "r_hip_pitch", "r_hip_roll", "r_hip_yaw", "r_knee", "r_ankle_pitch", "r_ankle_roll")</param>
         </group>
 
         <group name="InertialSensors">
-            <param name="imu_list">("waist_imu_0")</param>
+        <param name="accelerometers_list">(waist_imu_0, l_foot_front_ft_imu, l_foot_rear_ft_imu, r_foot_front_ft_imu, r_foot_rear_ft_imu)</param>
+        <param name="gyroscopes_list">(waist_imu_0, l_foot_front_ft_imu, l_foot_rear_ft_imu, r_foot_front_ft_imu, r_foot_rear_ft_imu)</param>
+        <param name="magnetometers_list">(waist_imu_0, l_foot_front_ft_imu, l_foot_rear_ft_imu, r_foot_front_ft_imu, r_foot_rear_ft_imu)</param>
+        <param name="orientation_sensors_list">(waist_imu_0, l_foot_front_ft_imu, l_foot_rear_ft_imu, r_foot_front_ft_imu, r_foot_rear_ft_imu)</param>
         </group>
 
         <group name="CartesianWrenches">
-            <param name="cartesian_wrenches_list">(DA MODIFICARE "right_foot_cartesian_wrench", "left_foot_cartesian_wrench")</param>
+            <param name="cartesian_wrenches_list">("left_foot_rear_wrench_client", "left_foot_front_wrench_client", "right_foot_rear_wrench_client", "right_foot_front_wrench_client")</param>
         </group>
     </group>
 
@@ -117,11 +120,11 @@ BSD-3-Clause license. -->
     <action phase="startup" level="15" type="attach">
         <paramlist name="networks">
             <elem name="all_joints">all_joints_mc</elem>
-            <elem name="root_link_imu_acc">root_link_imu_acc</elem>
-            <elem name="left_foot_rear_wrench">left_foot_rear_wrench_client</elem>
-            <elem name="left_foot_front_wrench">left_foot_front_wrench_client</elem>
-            <elem name="right_foot_rear_wrench">right_foot_rear_wrench_client</elem>
-            <elem name="right_foot_front_wrench">right_foot_front_wrench_client</elem>
+            <elem name="mas-remapper">mas-remapper</elem>
+            <elem name="left_foot_front_wrench_client">left_foot_front_wrench_client</elem>
+            <elem name="left_foot_rear_wrench_client">left_foot_rear_wrench_client</elem>
+            <elem name="right_foot_front_wrench_client">right_foot_front_wrench_client</elem>
+            <elem name="right_foot_rear_wrench_client">right_foot_rear_wrench_client</elem>
         </paramlist>
     </action>
 

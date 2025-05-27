@@ -7,12 +7,12 @@ BSD-3-Clause license. -->
 
 <robot name="ergoCubGazeboV1_1" portprefix="FloatingBaseEstimator" build="1" xmlns:xi="http://www.w3.org/2001/XInclude">
     <devices>
-        <!-- clients -->
-        <xi:include href="interface/all_joints_mc.xml" />
-        <xi:include href="interface/imu_clients.xml" />
-        <xi:include href="interface/wrench_clients.xml" />
-        <!-- estimator -->
-        <xi:include href="estimators/invekf-base-estimator.xml" />
+        <!-- interface -->
+        <xi:include href="blf-floating-base-estimator-interfaces/all_joints_mc.xml" />
+        <xi:include href="blf-floating-base-estimator-interfaces/wrench_clients.xml" />
+        <xi:include href="blf-floating-base-estimator-interfaces/imu_clients.xml" />
+        <xi:include href="blf-floating-base-estimator-interfaces/mas-remapper.xml" />
+        <xi:include href="./invekf-floating-base-estimator.xml" />
     </devices>
 
 </robot>
