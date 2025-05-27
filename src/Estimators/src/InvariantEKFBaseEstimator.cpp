@@ -5,6 +5,7 @@
  * distributed under the terms of the BSD-3-Clause license.
  */
 
+#include <BipedalLocomotion/TextLogging/Logger.h>
 #include <BipedalLocomotion/FloatingBaseEstimators/InvariantEKFBaseEstimator.h>
 #include <iDynTree/EigenHelpers.h>
 
@@ -245,11 +246,12 @@ InvariantEKFBaseEstimator::~InvariantEKFBaseEstimator() = default;
 
 bool InvariantEKFBaseEstimator::customInitialization(std::weak_ptr<BipedalLocomotion::ParametersHandler::IParametersHandler> handler)
 {
+    constexpr auto logPrefix = "[InvariantEKFBaseEstimator::customInitialization]";
+
     auto handle = handler.lock();
     if (handle == nullptr)
     {
-        std::cerr << "[InvariantEKFBaseEstimator::customInitialization] The parameter handler has expired. Please check its scope."
-        << std::endl;
+        BipedalLocomotion::log()->error("{} The parameter handler has expired. Please check its scope.", logPrefix);
         return false;
     }
 
@@ -257,8 +259,7 @@ bool InvariantEKFBaseEstimator::customInitialization(std::weak_ptr<BipedalLocomo
     auto optionsHandle = handle->getGroup("Options");
     if (!setupOptions(optionsHandle))
     {
-        std::cerr << "[InvariantEKFBaseEstimator::customInitialization] Could not load options related parameters."
-        << std::endl;
+        BipedalLocomotion::log()->error("{} Could not load options related parameters.", logPrefix);
         return false;
     }
 
@@ -266,8 +267,7 @@ bool InvariantEKFBaseEstimator::customInitialization(std::weak_ptr<BipedalLocomo
     auto sensorDevHandle = handle->getGroup("SensorsStdDev");
     if (!setupSensorDevs(sensorDevHandle))
     {
-        std::cerr << "[InvariantEKFBaseEstimator::customInitialization] Could not load sensor stddev related parameters."
-        << std::endl;
+        BipedalLocomotion::log()->error("{} Could not load sensor stddev related parameters.", logPrefix);
         return false;
     }
 
@@ -275,8 +275,7 @@ bool InvariantEKFBaseEstimator::customInitialization(std::weak_ptr<BipedalLocomo
     auto initStateHandle = handle->getGroup("InitialStates");
     if (!setupInitialStates(initStateHandle))
     {
-        std::cerr << "[InvariantEKFBaseEstimator::customInitialization] Could not load initial states related parameters."
-        << std::endl;
+        BipedalLocomotion::log()->error("{} Could not load initial states related parameters.", logPrefix);
         return false;
     }
 
@@ -284,8 +283,7 @@ bool InvariantEKFBaseEstimator::customInitialization(std::weak_ptr<BipedalLocomo
     auto priorDevHandle = handle->getGroup("PriorsStdDev");
     if (!setupPriorDevs(priorDevHandle))
     {
-        std::cerr << "[InvariantEKFBaseEstimator::customInitialization] Could not load prior stddev related parameters."
-        << std::endl;
+        BipedalLocomotion::log()->error("{}Could not load prior stddev related parameters.", logPrefix);
         return false;
     }
 
@@ -591,15 +589,17 @@ bool InvariantEKFBaseEstimator::Impl::updateStates(const Eigen::VectorXd& obs,
                                                    FloatingBaseEstimators::InternalState& state,
                                                    Eigen::MatrixXd& P)
 {
+    constexpr auto logPrefix = "[InvariantEKFBaseEstimator::updateStates]";
+
     if (measModelJacobian.cols() != P.rows())
     {
-        std::cerr << "[InvariantEKFBaseEstimator::updateStates] Measurement model Jacobian size mismatch" << std::endl;
+        BipedalLocomotion::log()->error("{} Measurement model Jacobian size mismatch.", logPrefix);
         return false;
     }
 
     if (measModelJacobian.rows() != measNoiseVar.rows())
     {
-        std::cerr << "[InvariantEKFBaseEstimator::updateStates] Measurement noise covariance matrix size mismatch" << std::endl;
+        BipedalLocomotion::log()->error("{} Measurement noise covariance matrix size mismatch.", logPrefix);
         return false;
     }
 
@@ -637,14 +637,14 @@ bool InvariantEKFBaseEstimator::Impl::updateStates(const Eigen::VectorXd& obs,
 
     // update state
     if (!calcExpHatX(m_delta.segment(0, m_vecSizeWOBias), m_dX))
-    {
-        std::cerr << "[InvariantEKFBaseEstimator::updateStates] Could not compute state update";
+    {   
+        BipedalLocomotion::log()->error("{} Could not compute state update.", logPrefix);
         return false;
     }
 
     if (!constructState( m_dX*m_X, m_theta+m_deltaTheta, state) ) // right invariant update
     {
-        std::cerr << "[InvariantEKFBaseEstimator::updateStates] Could not update state";
+        BipedalLocomotion::log()->error("{} Could not construct state from update.", logPrefix);
         return false;
     }
     // update covariance
@@ -731,9 +731,12 @@ bool InvariantEKFBaseEstimator::Impl::constructState(const Eigen::MatrixXd& X,
                                                      const Eigen::Matrix<double, 6, 1>& theta,
                                                      FloatingBaseEstimators::InternalState& state)
 {
+
+    constexpr auto logPrefix = "[InvariantEKFBaseEstimator::constructState]";
+
     if (X.rows() != 7 && X.cols() != 7)
     {
-        std::cerr << "[InvariantEKFBaseEstimator::constructState] State matrix does not seem to have expected size of 7x7." << std::endl;
+        BipedalLocomotion::log()->error("{} State matrix does not seem to have expected size of 7x7.", logPrefix);
         return false;
     }
 
@@ -750,6 +753,9 @@ bool InvariantEKFBaseEstimator::Impl::constructState(const Eigen::MatrixXd& X,
 bool InvariantEKFBaseEstimator::Impl::calcExpHatX(const Eigen::VectorXd& vec,
                                                   Eigen::MatrixXd& X)
 {
+
+    constexpr auto logPrefix = "[InvariantEKFBaseEstimator::constructState]";
+
     // Exp(vec) = Exp([ w]) =    |ExpSO3(w)  JlSO3(w)v  JlSO3(w)p  JlSO3(w)pr  JlSO3(w)pl|
     //               ([ a])      |                   1                                   |
     //               ([ v])      |                              1                        |
@@ -758,7 +764,8 @@ bool InvariantEKFBaseEstimator::Impl::calcExpHatX(const Eigen::VectorXd& vec,
     // where JlSO3 is the left Jacobian of SO(3)
     if (vec.size() != 15)
     {
-        std::cerr << "[InvariantEKFBaseEstimator::calcExpHatX] State vector does not seem to have expected size of 15x1." << std::endl;
+        BipedalLocomotion::log()->error(
+            "{} State vector does not seem to have expected size of 15x1.", logPrefix);
         return false;
     }
 
@@ -940,9 +947,12 @@ bool InvariantEKFBaseEstimator::Impl::copyDiagX(const Eigen::MatrixXd& X,
                                                 const int& n,
                                                 Eigen::MatrixXd& BigX)
 {
+    constexpr auto logPrefix = "[InvariantEKFBaseEstimator::copyDiagX]";
+
     if (X.rows() != 7 && X.cols() != 7)
     {
-        std::cerr << "[InvariantEKFBaseEstimator::copyDiagX] State matrix does not seem to have expected size of 7x7." << std::endl;
+        BipedalLocomotion::log()->error(
+            "{} State matrix does not seem to have expected size of 7x7.", logPrefix);
         return false;
     }
 
