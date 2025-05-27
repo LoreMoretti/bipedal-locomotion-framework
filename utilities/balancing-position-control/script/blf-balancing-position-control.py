@@ -127,7 +127,7 @@ class AdmittanceController:
             np.abs(self.joint_torque_limits)
 )
 
-        self.current = self.joints_torque / (self.gear_ratio * self.ktau)
+        self.motor_current = self.joints_torque / (self.gear_ratio * self.ktau)
         
     def get_motor_current(self) -> np.ndarray:
         
@@ -458,6 +458,12 @@ def main():
     )
     vectors_collection_server.populate_metadata(
         "joints::desired::position",
+        param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_string(
+            "joints_list"
+        ),
+    )
+    vectors_collection_server.populate_metadata(
+        "joints::desired::current",
         param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_string(
             "joints_list"
         ),
