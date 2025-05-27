@@ -695,6 +695,9 @@ def main():
             vectors_collection_server.populate_data(
                 "joints::desired::position", desired_joint_positions
             )
+            vectors_collection_server.populate_data(
+                "joints::desired::current", desired_control_signal
+            )
 
             vectors_collection_server.send_data()
 
