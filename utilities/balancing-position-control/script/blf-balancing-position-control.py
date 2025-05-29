@@ -12,6 +12,9 @@ import idyntree.bindings as idyn
 
 import manifpy as manif
 
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
 ## extend the python path
 from pathlib import Path
 import sys
@@ -238,14 +241,163 @@ def get_base_frame(base_frame: str, kindyn: idyn.KinDynComputations):
         frame_base_index, link_base_index
     )
 
+@dataclass
+class Trajectory:
+    position: np.ndarray
+    velocity: np.ndarray
+    acceleration: np.ndarray
 
-def create_new_spline(knots_positions, motion_duration: timedelta, dt: timedelta):
-    com_spline = blf.math.QuinticSpline()
-    com_spline.set_initial_conditions([0, 0, 0], [0, 0, 0])
-    com_spline.set_final_conditions([0, 0, 0], [0, 0, 0])
-    com_spline.set_advance_time_step(dt)
-    com_spline.set_knots(knots_positions, [timedelta(seconds=0), motion_duration])
-    return com_spline
+class TrajectoryGenerator(ABC):
+    """Abstract class for trajectory generators.
+    It defines the interface for the trajectory generators.
+    The trajectory is defined by a position, velocity, and acceleration."""
+    
+    @abstractmethod
+    def advance(self) -> bool:
+        """Advance the trajectory to the next time step."""
+        pass
+    
+    @abstractmethod
+    def get_output(self) -> Trajectory:
+        """Get the output of the trajectory."""
+        pass
+
+class SplineTrajectoryGenerator(TrajectoryGenerator):
+    """Class to generate a trajectory using a spline.
+    It uses the QuinticSpline class from the bipedal_locomotion_framework.math module to generate the trajectory.
+    The trajectory is defined by a set of knots and the initial and final conditions."""
+    
+    def __init__(self, knots_positions, motion_duration: timedelta, dt: timedelta):
+        self.create_new_spline(knots_positions, motion_duration, dt)
+    
+    def advance(self) -> bool:
+        """Advance the spline to the next time step."""
+        return self.spline.advance()
+    
+    def get_output(self) -> Trajectory:
+        """Get the output of the spline."""
+        spline_output = self.spline.get_output()
+        return Trajectory(
+            position=spline_output.position,
+            velocity=spline_output.velocity,
+            acceleration=spline_output.acceleration
+        )
+    
+    def create_new_spline(self, knots_positions, motion_duration: timedelta, dt: timedelta):
+        spline = blf.math.QuinticSpline()
+        spline.set_initial_conditions([0, 0, 0], [0, 0, 0])
+        spline.set_final_conditions([0, 0, 0], [0, 0, 0])
+        spline.set_advance_time_step(dt)
+        spline.set_knots(knots_positions, [timedelta(seconds=0), motion_duration])
+        self.spline = spline
+
+
+class SinusoidalTrajectoryGenerator(TrajectoryGenerator):
+    """Class to generate a sinusoidal trajectory in x, y, and z-directions.
+    It uses the SinusoidalSpline class from the bipedal_locomotion_framework.math module to generate the trajectory.
+    The trajectory is defined by the initial and final conditions, the amplitude, and the frequency."""
+    
+    def __init__(self, t_start:timedelta, t_end:timedelta, amplitude: np.ndarray, frequency: np.ndarray, dt: timedelta,
+                 initial_position: np.ndarray = np.zeros(3)):
+        
+        self.time = timedelta(seconds=0)
+        self.t_start = t_start
+        self.t_end = t_end
+        self.amplitude = amplitude
+        self.frequency = frequency
+        self.dt = dt
+        self.initial_position = initial_position
+        # lambda function to compute the position at time t
+        self.position = lambda A, f, t, t0, x0: (
+            x0 + A * np.sin(2 * np.pi * f * (t - t0))
+        )
+        # lambda function to compute the velocity at time t
+        self.velocity = lambda A, f, t, t0: (
+            2 * np.pi * f * A * np.cos(2 * np.pi * f * (t - t0))
+        )
+        # lambda function to compute the acceleration at time t
+        self.acceleration = lambda A, f, t, t0: (
+            - (2 * np.pi * f) ** 2 * A * np.sin(2 * np.pi * f * (t - t0))
+        )
+
+    def advance(self) -> bool:
+        """Advance the sinusoid to the next time step."""
+        self.time += self.dt
+        self.trajectory = Trajectory(
+            position=np.array([
+                self.position(self.amplitude[0], self.frequency[0], self.time.total_seconds(), self.t_start.total_seconds(), self.initial_position[0]),
+                self.position(self.amplitude[1], self.frequency[1], self.time.total_seconds(), self.t_start.total_seconds(), self.initial_position[1]),
+                self.position(self.amplitude[2], self.frequency[2], self.time.total_seconds(), self.t_start.total_seconds(), self.initial_position[2])
+            ]),
+            velocity=np.array([
+                self.velocity(self.amplitude[0], self.frequency[0], self.time.total_seconds(), self.t_start.total_seconds()),
+                self.velocity(self.amplitude[1], self.frequency[1], self.time.total_seconds(), self.t_start.total_seconds()),
+                self.velocity(self.amplitude[2], self.frequency[2], self.time.total_seconds(), self.t_start.total_seconds())
+            ]),
+            acceleration=np.array([
+                self.acceleration(self.amplitude[0], self.frequency[0], self.time.total_seconds(), self.t_start.total_seconds()),
+                self.acceleration(self.amplitude[1], self.frequency[1], self.time.total_seconds(), self.t_start.total_seconds()),
+                self.acceleration(self.amplitude[2], self.frequency[2], self.time.total_seconds(), self.t_start.total_seconds())
+            ])
+        )
+
+        return True
+    
+    def get_output(self) -> Trajectory:
+        """Get the output of the sinusoidal trajectory."""
+        return self.trajectory
+
+
+class ComReferenceTrajectoryGenerator:
+
+    @staticmethod
+    def create_spline_generator(
+        knots_positions: np.ndarray,
+        motion_duration: timedelta,
+        dt: timedelta) -> SplineTrajectoryGenerator:
+        """Create a spline trajectory generator for the CoM reference trajectory.
+        Args:
+            knots_positions (np.ndarray): The positions of the knots for the spline.
+            motion_duration (timedelta): The duration of the motion.
+            dt (timedelta): The time step for the trajectory.
+        Returns:
+            SplineTrajectoryGenerator: An instance of the SplineTrajectoryGenerator class.
+        """
+        return SplineTrajectoryGenerator(
+            knots_positions=knots_positions,
+            motion_duration=motion_duration,
+            dt=dt
+        )
+    
+    @staticmethod
+    def create_sinusoidal_generator(
+        t_start: timedelta,
+        t_end: timedelta,
+        amplitude: np.ndarray,
+        frequency: np.ndarray,
+        dt: timedelta,
+        initial_position: np.ndarray = np.zeros(3)
+    ) -> SinusoidalTrajectoryGenerator:
+        """Create a sinusoidal trajectory generator for the CoM reference trajectory.
+        Args:
+            t_start (timedelta): The start time of the trajectory.
+            t_end (timedelta): The end time of the trajectory.
+            amplitude (np.ndarray): The amplitude of the sinusoidal trajectory.
+            frequency (np.ndarray): The frequency of the sinusoidal trajectory.
+            dt (timedelta): The time step for the trajectory.
+            initial_position (np.ndarray): The initial position of the CoM.
+        Returns:
+            SinusoidalTrajectoryGenerator: An instance of the SinusoidalTrajectoryGenerator class.
+        """
+        return SinusoidalTrajectoryGenerator(
+            t_start=t_start,
+            t_end=t_end,
+            amplitude=amplitude,
+            frequency=frequency,
+            dt=dt,
+            initial_position=initial_position
+        )
+
 
 
 def main():
@@ -395,29 +547,57 @@ def main():
 
     desired_joint_positions = joint_positions.copy()
 
-    com_knots_delta_x = param_handler.get_parameter_vector_float("com_knots_delta_x")
-    com_knots_delta_y = param_handler.get_parameter_vector_float("com_knots_delta_y")
-    com_knots_delta_z = param_handler.get_parameter_vector_float("com_knots_delta_z")
-    motion_duration = param_handler.get_parameter_datetime("motion_duration")
-    motion_timeout = param_handler.get_parameter_datetime("motion_timeout")
+    # get com trajectory type
+    com_trajectory_type = param_handler.get_parameter_string("com_trajectory_type")
+    
+    # create the trajectory generator for the CoM
+    if com_trajectory_type == "sinusoidal":
 
-    spline = create_new_spline(
-        [
-            initial_com_position
-            + np.array(
-                [com_knots_delta_x[0], com_knots_delta_y[0], com_knots_delta_z[0]]
+        t_start = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_datetime("t_start")
+        t_end = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_datetime("t_end")
+        com_amplitude_x = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_amplitude_x")
+        com_amplitude_y = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_amplitude_y")
+        com_amplitude_z = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_amplitude_z")
+        com_frequency_x = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_frequency_x")
+        com_frequency_y = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_frequency_y")
+        com_frequency_z = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_frequency_z")
+        trajectory_generator = ComReferenceTrajectoryGenerator.create_sinusoidal_generator(
+            t_start=t_start,
+            t_end=t_end,
+            amplitude=np.array(
+                [com_amplitude_x, com_amplitude_y, com_amplitude_z], dtype=np.float64
             ),
-            initial_com_position
-            + np.array(
-                [com_knots_delta_x[1], com_knots_delta_y[1], com_knots_delta_z[1]]
+            frequency=np.array(
+                [com_frequency_x, com_frequency_y, com_frequency_z], dtype=np.float64
             ),
-        ],
-        motion_duration,
-        dt,
-    )
+            dt=dt,
+            initial_position=initial_com_position,
+        )
 
-    index = 0
-    knot_index = 1
+    elif com_trajectory_type == "spline":
+
+        com_knots_delta_x = param_handler.get_group("SPLINE_COM_TRAJECTORY").get_parameter_vector_float("com_knots_delta_x")
+        com_knots_delta_y = param_handler.get_group("SPLINE_COM_TRAJECTORY").get_parameter_vector_float("com_knots_delta_y")
+        com_knots_delta_z = param_handler.get_group("SPLINE_COM_TRAJECTORY").get_parameter_vector_float("com_knots_delta_z")
+        motion_duration = param_handler.get_group("SPLINE_COM_TRAJECTORY").get_parameter_datetime("motion_duration")
+        motion_timeout = param_handler.get_group("SPLINE_COM_TRAJECTORY").get_parameter_datetime("motion_timeout")
+
+        trajectory_generator = ComReferenceTrajectoryGenerator.create_spline_generator(
+            knots_positions=
+                [
+                    np.array([com_knots_delta_x[0], com_knots_delta_y[0], com_knots_delta_z[0]]) + initial_com_position,
+                    np.array([com_knots_delta_x[1], com_knots_delta_y[1], com_knots_delta_z[1]]) + initial_com_position,
+                ],
+            motion_duration=motion_duration,
+            dt=dt,
+        )
+        index = 0
+        knot_index = 1
+    else:
+        raise ValueError(
+            f"Invalid com_trajectory_type: {com_trajectory_type}. "
+            "Expected 'sinusoidal' or 'spline'."
+        )
 
     lipm_omega_square = (
         blf.math.StandardAccelerationOfGravitation / initial_com_position[2]
@@ -574,23 +754,23 @@ def main():
             global_zmp_from_measured = global_cop_evaluator.get_output()
 
             # use the CoM-ZMP controller
-            if not spline.advance():
-                raise RuntimeError("Unable to advance the spline")
+            if not trajectory_generator.advance():
+                raise RuntimeError("Unable to advance the trajectory")
 
-            com_spline_output = spline.get_output()
+            com_reference_trajectory = trajectory_generator.get_output()
             # evaluate the desired ZMP using the LIP model
             # ddx_com = omega^2 * (x_com - x_zmp)
             desired_zmp = (
-                com_spline_output.position[:2]
-                - com_spline_output.acceleration[:2] / lipm_omega_square
+                com_reference_trajectory.position[:2]
+                - com_reference_trajectory.acceleration[:2] / lipm_omega_square
             )
             desired_zmp = np.append(desired_zmp, 0.0)
 
             # set the desired ZMP and the feedback if close_loop_with_zmp is true
             if close_loop_with_zmp:
                 com_zmp_controller.set_set_point(
-                    com_spline_output.velocity[:2],
-                    com_spline_output.position[:2],
+                    com_reference_trajectory.velocity[:2],
+                    com_reference_trajectory.position[:2],
                     desired_zmp[:2],
                 )
                 com_zmp_controller.set_feedback(
@@ -604,15 +784,15 @@ def main():
             # evaluate the desired CoM position
             if close_loop_with_zmp:
                 desired_com_velocity = np.append(
-                    com_zmp_controller.get_output(), com_spline_output.velocity[2]
+                    com_zmp_controller.get_output(), com_reference_trajectory.velocity[2]
                 )
                 desired_com_position[0:2] += (
                     com_zmp_controller.get_output() * dt.total_seconds()
                 )
-                desired_com_position[2] = com_spline_output.position[2]
+                desired_com_position[2] = com_reference_trajectory.position[2]
             else:
-                desired_com_velocity = com_spline_output.velocity
-                desired_com_position = com_spline_output.position
+                desired_com_velocity = com_reference_trajectory.velocity
+                desired_com_position = com_reference_trajectory.position
 
             # solve the IK
             if not ik.tasks["com_task"].set_set_point(
@@ -687,13 +867,13 @@ def main():
                 "com::measured::with_joint_measured", com_from_measured
             )
             vectors_collection_server.populate_data(
-                "com::planned::position", com_spline_output.position
+                "com::planned::position", com_reference_trajectory.position
             )
             vectors_collection_server.populate_data(
-                "com::planned::velocity", com_spline_output.velocity
+                "com::planned::velocity", com_reference_trajectory.velocity
             )
             vectors_collection_server.populate_data(
-                "com::planned::acceleration", com_spline_output.acceleration
+                "com::planned::acceleration", com_reference_trajectory.acceleration
             )
             vectors_collection_server.populate_data(
                 "com::com_zmp::position", desired_com_position
@@ -710,38 +890,46 @@ def main():
 
             vectors_collection_server.send_data()
 
-            if index * dt >= motion_duration + motion_timeout:
-                if knot_index + 1 >= len(com_knots_delta_x):
+            # check termination conditions
+            if com_trajectory_type == "spline":
+                # check if we need to create a new spline
+                if index * dt >= motion_duration + motion_timeout:
+                    if knot_index + 1 >= len(com_knots_delta_x):
+                        blf.log().info("Motion completed. Closing.")
+                        break
+
+                    trajectory_generator.create_new_spline(
+                        [
+                            initial_com_position
+                            + np.array(
+                                [
+                                    com_knots_delta_x[knot_index],
+                                    com_knots_delta_y[knot_index],
+                                    com_knots_delta_z[knot_index],
+                                ]
+                            ),
+                            initial_com_position
+                            + np.array(
+                                [
+                                    com_knots_delta_x[knot_index + 1],
+                                    com_knots_delta_y[knot_index + 1],
+                                    com_knots_delta_z[knot_index + 1],
+                                ]
+                            ),
+                        ],
+                        motion_duration,
+                        dt,
+                    )
+
+                    knot_index += 1
+                    index = 0
+                else:
+                    index += 1
+
+            elif com_trajectory_type == "sinusoidal":
+                if trajectory_generator.time >= trajectory_generator.t_end:
                     blf.log().info("Motion completed. Closing.")
                     break
-
-                spline = create_new_spline(
-                    [
-                        initial_com_position
-                        + np.array(
-                            [
-                                com_knots_delta_x[knot_index],
-                                com_knots_delta_y[knot_index],
-                                com_knots_delta_z[knot_index],
-                            ]
-                        ),
-                        initial_com_position
-                        + np.array(
-                            [
-                                com_knots_delta_x[knot_index + 1],
-                                com_knots_delta_y[knot_index + 1],
-                                com_knots_delta_z[knot_index + 1],
-                            ]
-                        ),
-                    ],
-                    motion_duration,
-                    dt,
-                )
-
-                knot_index += 1
-                index = 0
-            else:
-                index += 1
 
             toc = blf.clock().now()
             delta_time = toc - tic
