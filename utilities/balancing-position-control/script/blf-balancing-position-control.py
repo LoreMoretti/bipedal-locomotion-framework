@@ -2,22 +2,20 @@
 
 # This software may be modified and distributed under the terms of the BSD-3-Clause license.
 
-import time
-import numpy as np
 import datetime
-
-import bipedal_locomotion_framework as blf
-import yarp
-import idyntree.bindings as idyn
-
-import manifpy as manif
-
+import sys
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 ## extend the python path
 from pathlib import Path
-import sys
+
+import bipedal_locomotion_framework as blf
+import idyntree.bindings as idyn
+import manifpy as manif
+import numpy as np
+import yarp
 
 sys.path.extend(
     [
@@ -33,6 +31,7 @@ sys.path.extend(
 
 from datetime import timedelta
 
+
 # from balancing_position_control.wbc import WBC
 class WBC:
     def __init__(
@@ -44,9 +43,12 @@ class WBC:
             kindyn=kindyn, param_handler=param_handler
         )
 
+
 # add a class which implements an admittance controller, with set_input, advance, and get_output methods
 class AdmittanceController:
-    def __init__(self,):
+    def __init__(
+        self,
+    ):
         self.is_initialized = False
 
     def initialize(self, param_handler: blf.parameters_handler.IParametersHandler):
@@ -55,8 +57,10 @@ class AdmittanceController:
         self.kd_gains = param_handler.get_parameter_vector_float("kd_gains")
         self.gear_ratio = param_handler.get_parameter_vector_float("gear_ratio")
         self.ktau = param_handler.get_parameter_vector_float("ktau")
-        self.joint_torque_limits = param_handler.get_parameter_vector_float("max_torque")
-       
+        self.joint_torque_limits = param_handler.get_parameter_vector_float(
+            "max_torque"
+        )
+
         # Check that vector parameters have the same length
         vector_lengths = [
             len(self.kp_gains),
@@ -67,20 +71,22 @@ class AdmittanceController:
         ]
 
         if len(set(vector_lengths)) != 1:
-            raise ValueError(f"Vector parameters have mismatched lengths: "
-                            f"kp_gains={len(self.kp_gains)}, "
-                            f"kd_gains={len(self.kd_gains)}, "
-                            f"ktau={len(self.ktau)}, "
-                            f"gear_ratio={self.gear_ratio}, "
-                            f"joint_torque_limits={len(self.joint_torque_limits)}")
-        
+            raise ValueError(
+                f"Vector parameters have mismatched lengths: "
+                f"kp_gains={len(self.kp_gains)}, "
+                f"kd_gains={len(self.kd_gains)}, "
+                f"ktau={len(self.ktau)}, "
+                f"gear_ratio={self.gear_ratio}, "
+                f"joint_torque_limits={len(self.joint_torque_limits)}"
+            )
+
         # convert to numpy arrays
         self.kp_gains = np.array(self.kp_gains, dtype=np.float64)
         self.kd_gains = np.array(self.kd_gains, dtype=np.float64)
         self.gear_ratio = np.array(self.gear_ratio, dtype=np.float64)
         self.ktau = np.array(self.ktau, dtype=np.float64)
         self.joint_torque_limits = np.array(self.joint_torque_limits, dtype=np.float64)
-        
+
         self.is_initialized = True
 
         # initialize the input/output
@@ -90,23 +96,31 @@ class AdmittanceController:
         self.joints_torque = np.zeros(len(self.kp_gains))
         self.motor_current = np.zeros(len(self.kp_gains))
 
+    def set_input(
+        self,
+        joints_position: np.ndarray,
+        joints_velocity: np.ndarray,
+        joints_desired_position: np.ndarray,
+    ):
 
-    def set_input(self, joints_position: np.ndarray, joints_velocity: np.ndarray, joints_desired_position: np.ndarray):
-        
         # check is_initialized
         if not self.is_initialized:
-            raise RuntimeError("AdmittanceController is not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "AdmittanceController is not initialized. Call initialize() first."
+            )
 
         # check inputs are all the same size
-        if (len(joints_position) != len(joints_velocity) or
-            len(joints_position) != len(joints_desired_position) or
-            len(joints_velocity) != len(joints_desired_position)):
+        if (
+            len(joints_position) != len(joints_velocity)
+            or len(joints_position) != len(joints_desired_position)
+            or len(joints_velocity) != len(joints_desired_position)
+        ):
             raise ValueError("Input arrays must have the same length")
-        
+
         # check that they are the same size as the gains
-        if (len(joints_position) != len(self.kp_gains)):
+        if len(joints_position) != len(self.kp_gains):
             raise ValueError("Input arrays must have the same length as the gains")
-        
+
         self.joints_position = joints_position
         self.joints_velocity = joints_velocity
         self.joints_desired_position = joints_desired_position
@@ -115,37 +129,43 @@ class AdmittanceController:
 
         # check is_initialized
         if not self.is_initialized:
-            raise RuntimeError("AdmittanceController is not initialized. Call initialize() first.")
-        
+            raise RuntimeError(
+                "AdmittanceController is not initialized. Call initialize() first."
+            )
+
         # compute control law
         self.joints_torque = (
             self.kp_gains * (self.joints_desired_position - self.joints_position)
-            - self.kd_gains * self.joints_velocity *0
+            - self.kd_gains * self.joints_velocity * 0
         )
 
         # Apply limit to the torque
         self.joints_torque = np.clip(
             self.joints_torque,
             -np.abs(self.joint_torque_limits),
-            np.abs(self.joint_torque_limits)
-)
+            np.abs(self.joint_torque_limits),
+        )
 
         self.motor_current = self.joints_torque / (self.gear_ratio * self.ktau)
-        
+
     def get_motor_current(self) -> np.ndarray:
-        
+
         # check is_initialized
         if not self.is_initialized:
-            raise RuntimeError("AdmittanceController is not initialized. Call initialize() first.")
-        
+            raise RuntimeError(
+                "AdmittanceController is not initialized. Call initialize() first."
+            )
+
         return self.motor_current.copy()
-    
+
     def get_joint_torque(self) -> np.ndarray:
-        
+
         # check is_initialized
         if not self.is_initialized:
-            raise RuntimeError("AdmittanceController is not initialized. Call initialize() first.")
-        
+            raise RuntimeError(
+                "AdmittanceController is not initialized. Call initialize() first."
+            )
+
         return self.joints_torque.copy()
 
 
@@ -216,13 +236,13 @@ def build_kin_dyn(param_handler):
     joint_list = param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_string(
         "joints_list"
     )
-    fixed_joint_list = param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_string(
-        "fixed_joints_list"
-    )
-    fixed_joint_position = param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_float(
-        "fixed_joints_position"
-    )
-    fixed_joint_position = [angle * np.pi/180 for angle in fixed_joint_position]
+    fixed_joint_list = param_handler.get_group(
+        "ROBOT_CONTROL"
+    ).get_parameter_vector_string("fixed_joints_list")
+    fixed_joint_position = param_handler.get_group(
+        "ROBOT_CONTROL"
+    ).get_parameter_vector_float("fixed_joints_position")
+    fixed_joint_position = [angle * np.pi / 180 for angle in fixed_joint_position]
     # create map of fixed joints
     fixed_joints_map = dict(zip(fixed_joint_list, fixed_joint_position))
     ml = idyn.ModelLoader()
@@ -241,49 +261,54 @@ def get_base_frame(base_frame: str, kindyn: idyn.KinDynComputations):
         frame_base_index, link_base_index
     )
 
+
 @dataclass
 class Trajectory:
     position: np.ndarray
     velocity: np.ndarray
     acceleration: np.ndarray
 
+
 class TrajectoryGenerator(ABC):
     """Abstract class for trajectory generators.
     It defines the interface for the trajectory generators.
     The trajectory is defined by a position, velocity, and acceleration."""
-    
+
     @abstractmethod
     def advance(self) -> bool:
         """Advance the trajectory to the next time step."""
         pass
-    
+
     @abstractmethod
     def get_output(self) -> Trajectory:
         """Get the output of the trajectory."""
         pass
 
+
 class SplineTrajectoryGenerator(TrajectoryGenerator):
     """Class to generate a trajectory using a spline.
     It uses the QuinticSpline class from the bipedal_locomotion_framework.math module to generate the trajectory.
     The trajectory is defined by a set of knots and the initial and final conditions."""
-    
+
     def __init__(self, knots_positions, motion_duration: timedelta, dt: timedelta):
         self.create_new_spline(knots_positions, motion_duration, dt)
-    
+
     def advance(self) -> bool:
         """Advance the spline to the next time step."""
         return self.spline.advance()
-    
+
     def get_output(self) -> Trajectory:
         """Get the output of the spline."""
         spline_output = self.spline.get_output()
         return Trajectory(
             position=spline_output.position,
             velocity=spline_output.velocity,
-            acceleration=spline_output.acceleration
+            acceleration=spline_output.acceleration,
         )
-    
-    def create_new_spline(self, knots_positions, motion_duration: timedelta, dt: timedelta):
+
+    def create_new_spline(
+        self, knots_positions, motion_duration: timedelta, dt: timedelta
+    ):
         spline = blf.math.QuinticSpline()
         spline.set_initial_conditions([0, 0, 0], [0, 0, 0])
         spline.set_final_conditions([0, 0, 0], [0, 0, 0])
@@ -296,10 +321,17 @@ class SinusoidalTrajectoryGenerator(TrajectoryGenerator):
     """Class to generate a sinusoidal trajectory in x, y, and z-directions.
     It uses the SinusoidalSpline class from the bipedal_locomotion_framework.math module to generate the trajectory.
     The trajectory is defined by the initial and final conditions, the amplitude, and the frequency."""
-    
-    def __init__(self, t_start:timedelta, t_end:timedelta, amplitude: np.ndarray, frequency: np.ndarray, dt: timedelta,
-                 initial_position: np.ndarray = np.zeros(3)):
-        
+
+    def __init__(
+        self,
+        t_start: timedelta,
+        t_end: timedelta,
+        amplitude: np.ndarray,
+        frequency: np.ndarray,
+        dt: timedelta,
+        initial_position: np.ndarray = np.zeros(3),
+    ):
+
         self.time = timedelta(seconds=0)
         self.t_start = t_start
         self.t_end = t_end
@@ -317,44 +349,96 @@ class SinusoidalTrajectoryGenerator(TrajectoryGenerator):
         )
         # lambda function to compute the acceleration at time t
         self.acceleration = lambda A, f, t, t0: (
-            - (2 * np.pi * f) ** 2 * A * np.sin(2 * np.pi * f * (t - t0))
+            -((2 * np.pi * f) ** 2) * A * np.sin(2 * np.pi * f * (t - t0))
         )
 
     def advance(self) -> bool:
         """Advance the sinusoid to the next time step."""
         self.time += self.dt
         self.trajectory = Trajectory(
-            position=np.array([
-                self.position(self.amplitude[0], self.frequency[0], self.time.total_seconds(), self.t_start.total_seconds(), self.initial_position[0]),
-                self.position(self.amplitude[1], self.frequency[1], self.time.total_seconds(), self.t_start.total_seconds(), self.initial_position[1]),
-                self.position(self.amplitude[2], self.frequency[2], self.time.total_seconds(), self.t_start.total_seconds(), self.initial_position[2])
-            ]),
-            velocity=np.array([
-                self.velocity(self.amplitude[0], self.frequency[0], self.time.total_seconds(), self.t_start.total_seconds()),
-                self.velocity(self.amplitude[1], self.frequency[1], self.time.total_seconds(), self.t_start.total_seconds()),
-                self.velocity(self.amplitude[2], self.frequency[2], self.time.total_seconds(), self.t_start.total_seconds())
-            ]),
-            acceleration=np.array([
-                self.acceleration(self.amplitude[0], self.frequency[0], self.time.total_seconds(), self.t_start.total_seconds()),
-                self.acceleration(self.amplitude[1], self.frequency[1], self.time.total_seconds(), self.t_start.total_seconds()),
-                self.acceleration(self.amplitude[2], self.frequency[2], self.time.total_seconds(), self.t_start.total_seconds())
-            ])
+            position=np.array(
+                [
+                    self.position(
+                        self.amplitude[0],
+                        self.frequency[0],
+                        self.time.total_seconds(),
+                        self.t_start.total_seconds(),
+                        self.initial_position[0],
+                    ),
+                    self.position(
+                        self.amplitude[1],
+                        self.frequency[1],
+                        self.time.total_seconds(),
+                        self.t_start.total_seconds(),
+                        self.initial_position[1],
+                    ),
+                    self.position(
+                        self.amplitude[2],
+                        self.frequency[2],
+                        self.time.total_seconds(),
+                        self.t_start.total_seconds(),
+                        self.initial_position[2],
+                    ),
+                ]
+            ),
+            velocity=np.array(
+                [
+                    self.velocity(
+                        self.amplitude[0],
+                        self.frequency[0],
+                        self.time.total_seconds(),
+                        self.t_start.total_seconds(),
+                    ),
+                    self.velocity(
+                        self.amplitude[1],
+                        self.frequency[1],
+                        self.time.total_seconds(),
+                        self.t_start.total_seconds(),
+                    ),
+                    self.velocity(
+                        self.amplitude[2],
+                        self.frequency[2],
+                        self.time.total_seconds(),
+                        self.t_start.total_seconds(),
+                    ),
+                ]
+            ),
+            acceleration=np.array(
+                [
+                    self.acceleration(
+                        self.amplitude[0],
+                        self.frequency[0],
+                        self.time.total_seconds(),
+                        self.t_start.total_seconds(),
+                    ),
+                    self.acceleration(
+                        self.amplitude[1],
+                        self.frequency[1],
+                        self.time.total_seconds(),
+                        self.t_start.total_seconds(),
+                    ),
+                    self.acceleration(
+                        self.amplitude[2],
+                        self.frequency[2],
+                        self.time.total_seconds(),
+                        self.t_start.total_seconds(),
+                    ),
+                ]
+            ),
         )
 
         return True
-    
+
     def get_output(self) -> Trajectory:
         """Get the output of the sinusoidal trajectory."""
         return self.trajectory
 
 
 class ComReferenceTrajectoryGenerator:
-
     @staticmethod
     def create_spline_generator(
-        knots_positions: np.ndarray,
-        motion_duration: timedelta,
-        dt: timedelta) -> SplineTrajectoryGenerator:
+        knots_positions: np.ndarray, motion_duration: timedelta, dt: timedelta
+    ) -> SplineTrajectoryGenerator:
         """Create a spline trajectory generator for the CoM reference trajectory.
         Args:
             knots_positions (np.ndarray): The positions of the knots for the spline.
@@ -364,11 +448,9 @@ class ComReferenceTrajectoryGenerator:
             SplineTrajectoryGenerator: An instance of the SplineTrajectoryGenerator class.
         """
         return SplineTrajectoryGenerator(
-            knots_positions=knots_positions,
-            motion_duration=motion_duration,
-            dt=dt
+            knots_positions=knots_positions, motion_duration=motion_duration, dt=dt
         )
-    
+
     @staticmethod
     def create_sinusoidal_generator(
         t_start: timedelta,
@@ -376,7 +458,7 @@ class ComReferenceTrajectoryGenerator:
         amplitude: np.ndarray,
         frequency: np.ndarray,
         dt: timedelta,
-        initial_position: np.ndarray = np.zeros(3)
+        initial_position: np.ndarray = np.zeros(3),
     ) -> SinusoidalTrajectoryGenerator:
         """Create a sinusoidal trajectory generator for the CoM reference trajectory.
         Args:
@@ -395,9 +477,8 @@ class ComReferenceTrajectoryGenerator:
             amplitude=amplitude,
             frequency=frequency,
             dt=dt,
-            initial_position=initial_position
+            initial_position=initial_position,
         )
-
 
 
 def main():
@@ -447,10 +528,12 @@ def main():
         raise RuntimeError("Unable to initialize the robot control")
     if not robot_control.set_driver(poly_drivers["REMOTE_CONTROL_BOARD"].poly):
         raise RuntimeError("Unable to set the driver for the robot control")
-    
+
     # get robot name
-    robot_name = param_handler.get_group("ROBOT_CONTROL").get_parameter_string("robot_name")
-    
+    robot_name = param_handler.get_group("ROBOT_CONTROL").get_parameter_string(
+        "robot_name"
+    )
+
     if robot_name == "ergocubSim":
         is_simulation = True
     else:
@@ -515,12 +598,10 @@ def main():
             param_handler.get_group("COM_ZMP_CONTROLLER")
         ):
             raise RuntimeError("Unable to initialize the zmp-com controller")
-        
+
     # create and initialize the admittance controller
     admittance_controller = AdmittanceController()
-    admittance_controller.initialize(
-        param_handler.get_group("ADMITTANCE_CONTROL")
-    )
+    admittance_controller.initialize(param_handler.get_group("ADMITTANCE_CONTROL"))
 
     # create and initialize the IK
     ik = WBC(param_handler=param_handler.get_group("IK"), kindyn=kindyn)
@@ -549,45 +630,80 @@ def main():
 
     # get com trajectory type
     com_trajectory_type = param_handler.get_parameter_string("com_trajectory_type")
-    
+
     # create the trajectory generator for the CoM
     if com_trajectory_type == "sinusoidal":
 
-        t_start = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_datetime("t_start")
-        t_end = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_datetime("t_end")
-        com_amplitude_x = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_amplitude_x")
-        com_amplitude_y = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_amplitude_y")
-        com_amplitude_z = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_amplitude_z")
-        com_frequency_x = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_frequency_x")
-        com_frequency_y = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_frequency_y")
-        com_frequency_z = param_handler.get_group("SINUSOIDAL_COM_TRAJECTORY").get_parameter_float("com_frequency_z")
-        trajectory_generator = ComReferenceTrajectoryGenerator.create_sinusoidal_generator(
-            t_start=t_start,
-            t_end=t_end,
-            amplitude=np.array(
-                [com_amplitude_x, com_amplitude_y, com_amplitude_z], dtype=np.float64
-            ),
-            frequency=np.array(
-                [com_frequency_x, com_frequency_y, com_frequency_z], dtype=np.float64
-            ),
-            dt=dt,
-            initial_position=initial_com_position,
+        t_start = param_handler.get_group(
+            "SINUSOIDAL_COM_TRAJECTORY"
+        ).get_parameter_datetime("t_start")
+        t_end = param_handler.get_group(
+            "SINUSOIDAL_COM_TRAJECTORY"
+        ).get_parameter_datetime("t_end")
+        com_amplitude_x = param_handler.get_group(
+            "SINUSOIDAL_COM_TRAJECTORY"
+        ).get_parameter_float("com_amplitude_x")
+        com_amplitude_y = param_handler.get_group(
+            "SINUSOIDAL_COM_TRAJECTORY"
+        ).get_parameter_float("com_amplitude_y")
+        com_amplitude_z = param_handler.get_group(
+            "SINUSOIDAL_COM_TRAJECTORY"
+        ).get_parameter_float("com_amplitude_z")
+        com_frequency_x = param_handler.get_group(
+            "SINUSOIDAL_COM_TRAJECTORY"
+        ).get_parameter_float("com_frequency_x")
+        com_frequency_y = param_handler.get_group(
+            "SINUSOIDAL_COM_TRAJECTORY"
+        ).get_parameter_float("com_frequency_y")
+        com_frequency_z = param_handler.get_group(
+            "SINUSOIDAL_COM_TRAJECTORY"
+        ).get_parameter_float("com_frequency_z")
+        trajectory_generator = (
+            ComReferenceTrajectoryGenerator.create_sinusoidal_generator(
+                t_start=t_start,
+                t_end=t_end,
+                amplitude=np.array(
+                    [com_amplitude_x, com_amplitude_y, com_amplitude_z],
+                    dtype=np.float64,
+                ),
+                frequency=np.array(
+                    [com_frequency_x, com_frequency_y, com_frequency_z],
+                    dtype=np.float64,
+                ),
+                dt=dt,
+                initial_position=initial_com_position,
+            )
         )
 
     elif com_trajectory_type == "spline":
 
-        com_knots_delta_x = param_handler.get_group("SPLINE_COM_TRAJECTORY").get_parameter_vector_float("com_knots_delta_x")
-        com_knots_delta_y = param_handler.get_group("SPLINE_COM_TRAJECTORY").get_parameter_vector_float("com_knots_delta_y")
-        com_knots_delta_z = param_handler.get_group("SPLINE_COM_TRAJECTORY").get_parameter_vector_float("com_knots_delta_z")
-        motion_duration = param_handler.get_group("SPLINE_COM_TRAJECTORY").get_parameter_datetime("motion_duration")
-        motion_timeout = param_handler.get_group("SPLINE_COM_TRAJECTORY").get_parameter_datetime("motion_timeout")
+        com_knots_delta_x = param_handler.get_group(
+            "SPLINE_COM_TRAJECTORY"
+        ).get_parameter_vector_float("com_knots_delta_x")
+        com_knots_delta_y = param_handler.get_group(
+            "SPLINE_COM_TRAJECTORY"
+        ).get_parameter_vector_float("com_knots_delta_y")
+        com_knots_delta_z = param_handler.get_group(
+            "SPLINE_COM_TRAJECTORY"
+        ).get_parameter_vector_float("com_knots_delta_z")
+        motion_duration = param_handler.get_group(
+            "SPLINE_COM_TRAJECTORY"
+        ).get_parameter_datetime("motion_duration")
+        motion_timeout = param_handler.get_group(
+            "SPLINE_COM_TRAJECTORY"
+        ).get_parameter_datetime("motion_timeout")
 
         trajectory_generator = ComReferenceTrajectoryGenerator.create_spline_generator(
-            knots_positions=
-                [
-                    np.array([com_knots_delta_x[0], com_knots_delta_y[0], com_knots_delta_z[0]]) + initial_com_position,
-                    np.array([com_knots_delta_x[1], com_knots_delta_y[1], com_knots_delta_z[1]]) + initial_com_position,
-                ],
+            knots_positions=[
+                np.array(
+                    [com_knots_delta_x[0], com_knots_delta_y[0], com_knots_delta_z[0]]
+                )
+                + initial_com_position,
+                np.array(
+                    [com_knots_delta_x[1], com_knots_delta_y[1], com_knots_delta_z[1]]
+                )
+                + initial_com_position,
+            ],
             motion_duration=motion_duration,
             dt=dt,
         )
@@ -662,12 +778,10 @@ def main():
     # switch to position direct
     # robot_control.set_control_mode(blf.robot_interface.YarpRobotControl.PositionDirect)
 
-
     blf.log().info("Starting the balancing controller. Waiting for your input")
     blf.log().info("Press enter to start the balancing controller")
     input()
     blf.log().info("Starting the balancing controller")
-
 
     # switch to current control mode
     if is_simulation:
@@ -731,7 +845,7 @@ def main():
                 # raise RuntimeError("Unable to set the input for the global cop evaluator")
             # if not global_cop_evaluator.advance():
             #     pass
-                # raise RuntimeError("Unable to advance the global cop evaluator")
+            # raise RuntimeError("Unable to advance the global cop evaluator")
             global_zmp = global_cop_evaluator.get_output()
 
             # evaluate the global CoP using the measured joint state
@@ -750,7 +864,7 @@ def main():
                 # raise RuntimeError("Unable to set the input for the global cop evaluator")
             # if not global_cop_evaluator.advance():
             #     pass
-                # raise RuntimeError("Unable to advance the global cop evaluator")
+            # raise RuntimeError("Unable to advance the global cop evaluator")
             global_zmp_from_measured = global_cop_evaluator.get_output()
 
             # use the CoM-ZMP controller
@@ -784,7 +898,8 @@ def main():
             # evaluate the desired CoM position
             if close_loop_with_zmp:
                 desired_com_velocity = np.append(
-                    com_zmp_controller.get_output(), com_reference_trajectory.velocity[2]
+                    com_zmp_controller.get_output(),
+                    com_reference_trajectory.velocity[2],
                 )
                 desired_com_position[0:2] += (
                     com_zmp_controller.get_output() * dt.total_seconds()
@@ -935,7 +1050,7 @@ def main():
             delta_time = toc - tic
             if delta_time < dt:
                 blf.clock().sleep_for(dt - delta_time)
-        
+
     except KeyboardInterrupt:
         print("Interrupted by user (Ctrl+C).")
     except Exception as e:
