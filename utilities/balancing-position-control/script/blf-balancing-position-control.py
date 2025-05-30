@@ -52,9 +52,9 @@ class AdmittanceController:
         self.is_initialized = False
 
     def initialize(self, param_handler: blf.parameters_handler.IParametersHandler):
-        # parse the parameters from the parameter handler
+        # Parse the parameters from the parameter handler
         self.kp_gains = param_handler.get_parameter_vector_float("kp_gains")
-        self.kd_gains = param_handler.get_parameter_vector_float("kd_gains")
+        self.kp_gains_sim = param_handler.get_parameter_vector_float("kp_gains_sim")
         self.gear_ratio = param_handler.get_parameter_vector_float("gear_ratio")
         self.ktau = param_handler.get_parameter_vector_float("ktau")
         self.joint_torque_limits = param_handler.get_parameter_vector_float(
@@ -64,7 +64,7 @@ class AdmittanceController:
         # Check that vector parameters have the same length
         vector_lengths = [
             len(self.kp_gains),
-            len(self.kd_gains),
+            len(self.kp_gains_sim),
             len(self.gear_ratio),
             len(self.ktau),
             len(self.joint_torque_limits),
@@ -74,7 +74,7 @@ class AdmittanceController:
             raise ValueError(
                 f"Vector parameters have mismatched lengths: "
                 f"kp_gains={len(self.kp_gains)}, "
-                f"kd_gains={len(self.kd_gains)}, "
+                f"kp_gains_sim={len(self.kp_gains_sim)}, "
                 f"ktau={len(self.ktau)}, "
                 f"gear_ratio={self.gear_ratio}, "
                 f"joint_torque_limits={len(self.joint_torque_limits)}"
@@ -82,24 +82,28 @@ class AdmittanceController:
 
         # convert to numpy arrays
         self.kp_gains = np.array(self.kp_gains, dtype=np.float64)
-        self.kd_gains = np.array(self.kd_gains, dtype=np.float64)
+        self.kp_gains_sim = np.array(self.kp_gains_sim, dtype=np.float64)
         self.gear_ratio = np.array(self.gear_ratio, dtype=np.float64)
         self.ktau = np.array(self.ktau, dtype=np.float64)
         self.joint_torque_limits = np.array(self.joint_torque_limits, dtype=np.float64)
+
+        # Check that kp_gains_sim is not zero
+        if np.any(self.kp_gains_sim == 0):
+            raise ValueError(
+                "kp_gains_sim cannot be zero. Please provide non-zero values."
+            )
 
         self.is_initialized = True
 
         # initialize the input/output
         self.joints_desired_position = np.zeros(len(self.kp_gains))
         self.joints_position = np.zeros(len(self.kp_gains))
-        self.joints_velocity = np.zeros(len(self.kp_gains))
         self.joints_torque = np.zeros(len(self.kp_gains))
         self.motor_current = np.zeros(len(self.kp_gains))
 
     def set_input(
         self,
         joints_position: np.ndarray,
-        joints_velocity: np.ndarray,
         joints_desired_position: np.ndarray,
     ):
 
@@ -110,11 +114,7 @@ class AdmittanceController:
             )
 
         # check inputs are all the same size
-        if (
-            len(joints_position) != len(joints_velocity)
-            or len(joints_position) != len(joints_desired_position)
-            or len(joints_velocity) != len(joints_desired_position)
-        ):
+        if len(joints_position) != len(joints_desired_position):
             raise ValueError("Input arrays must have the same length")
 
         # check that they are the same size as the gains
@@ -122,8 +122,30 @@ class AdmittanceController:
             raise ValueError("Input arrays must have the same length as the gains")
 
         self.joints_position = joints_position
-        self.joints_velocity = joints_velocity
         self.joints_desired_position = joints_desired_position
+
+    def get_desired_position_tilde(self) -> np.ndarray:
+        """
+        Compute the desired position tilde, as described in
+        https://github.com/ami-iit/element_sim-2-real-actuatornet/issues/55#issuecomment-2921947297
+        """
+
+        # Compute Gamma
+        Gamma = self.kp_gains / self.kp_gains_sim
+
+        # check is_initialized
+        if not self.is_initialized:
+            raise RuntimeError(
+                "AdmittanceController is not initialized. Call initialize() first."
+            )
+
+        # compute the desired position tilde
+        desired_position_tilde = (
+            Gamma * (self.joints_desired_position - self.joints_position)
+            + self.joints_position
+        )
+
+        return desired_position_tilde
 
     def advance(self):
 
@@ -133,10 +155,10 @@ class AdmittanceController:
                 "AdmittanceController is not initialized. Call initialize() first."
             )
 
-        # compute control law
-        self.joints_torque = (
-            self.kp_gains * (self.joints_desired_position - self.joints_position)
-            - self.kd_gains * self.joints_velocity * 0
+        # compute control law, according to the trick described in
+        # https://github.com/ami-iit/element_sim-2-real-actuatornet/issues/55#issuecomment-2921947297
+        self.joints_torque = self.kp_gains_sim * (
+            self.get_desired_position_tilde() - self.joints_position
         )
 
         # Apply limit to the torque
@@ -940,12 +962,12 @@ def main():
             desired_joint_velocities = ik.solver.get_output().joint_velocity
 
             # admittance controller
-            GAMMMA = 10
-            joint_positions_tilde = (
-                desired_joint_positions - joint_positions
-            ) * GAMMMA + joint_positions
             admittance_controller.set_input(
-                joint_positions, joint_velocities, joint_positions_tilde
+                joints_position=joint_positions,
+                joints_desired_position=desired_joint_positions,
+            )
+            desired_joint_positions_tilde = (
+                admittance_controller.get_desired_position_tilde()
             )
             admittance_controller.advance()
             if is_simulation:
@@ -953,13 +975,13 @@ def main():
             else:
                 desired_control_signal = admittance_controller.get_motor_current()
 
-            # # send the joint pose
+            # # send the joint position
             # if not robot_control.set_references(
             #     desired_joint_positions,
             #     blf.robot_interface.YarpRobotControl.PositionDirect,
             #     joint_positions,
             # ):
-            #     raise RuntimeError("Unable to set the references")
+            #     raise RuntimeError("Unable to set the position references")
 
             # send the motor current
             if not robot_control.set_references(
@@ -1029,7 +1051,7 @@ def main():
                 "joints::desired::position", desired_joint_positions
             )
             vectors_collection_server.populate_data(
-                "joints::desired::position_tilde", joint_positions_tilde
+                "joints::desired::position_tilde", desired_joint_positions_tilde
             )
             vectors_collection_server.populate_data(
                 "joints::desired::current", desired_control_signal
