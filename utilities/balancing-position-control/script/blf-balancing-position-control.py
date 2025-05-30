@@ -761,6 +761,15 @@ def main():
     vectors_collection_server.populate_metadata(
         "com::com_zmp::velocity", ["x", "y", "z"]
     )
+
+    vectors_collection_server.populate_metadata(
+        "root_link::measured::position", ["x", "y", "z"]
+    )
+
+    vectors_collection_server.populate_metadata(
+        "root_link::measured::orientation", ["r", "p", "y"]
+    )
+
     vectors_collection_server.populate_metadata(
         "joints::desired::position",
         param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_string(
@@ -840,12 +849,10 @@ def main():
                 kindyn.getWorldTransform(right_contact_frame)
             )
 
-            if not global_cop_evaluator.set_input([left_contact, right_contact]):
-                pass
-                # raise RuntimeError("Unable to set the input for the global cop evaluator")
+            # if not global_cop_evaluator.set_input([left_contact, right_contact]):
+            #     raise RuntimeError("Unable to set the input for the global cop evaluator")
             # if not global_cop_evaluator.advance():
-            #     pass
-            # raise RuntimeError("Unable to advance the global cop evaluator")
+            #     raise RuntimeError("Unable to advance the global cop evaluator")
             global_zmp = global_cop_evaluator.get_output()
 
             # evaluate the global CoP using the measured joint state
@@ -863,8 +870,7 @@ def main():
                 pass
                 # raise RuntimeError("Unable to set the input for the global cop evaluator")
             # if not global_cop_evaluator.advance():
-            #     pass
-            # raise RuntimeError("Unable to advance the global cop evaluator")
+            #     raise RuntimeError("Unable to advance the global cop evaluator")
             global_zmp_from_measured = global_cop_evaluator.get_output()
 
             # use the CoM-ZMP controller
@@ -959,8 +965,19 @@ def main():
             com_from_desired = kindyn.getCenterOfMassPosition().toNumPy()
             com_from_measured = kindyn_with_measured.getCenterOfMassPosition().toNumPy()
 
+            root_link_pose = kindyn.getWorldTransform("root_link")
+            root_link_position = root_link_pose.getPosition().toNumPy()
+            root_link_orientation = root_link_pose.getRotation().asRPY().toNumPy()
+
             vectors_collection_server.prepare_data()
             vectors_collection_server.clear_data()
+
+            vectors_collection_server.populate_data(
+                "root_link::measured::position", root_link_position
+            )
+            vectors_collection_server.populate_data(
+                "root_link::measured::orientation", root_link_orientation
+            )
 
             vectors_collection_server.populate_data("zmp::desired_planner", desired_zmp)
             vectors_collection_server.populate_data(
