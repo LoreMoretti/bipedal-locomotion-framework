@@ -776,6 +776,14 @@ def main():
             "joints_list"
         ),
     )
+
+    vectors_collection_server.populate_metadata(
+        "joints::desired::position_tilde",
+        param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_string(
+            "joints_list"
+        ),
+    )
+
     vectors_collection_server.populate_metadata(
         "joints::desired::current",
         param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_string(
@@ -932,8 +940,12 @@ def main():
             desired_joint_velocities = ik.solver.get_output().joint_velocity
 
             # admittance controller
+            GAMMMA = 10
+            joint_positions_tilde = (
+                desired_joint_positions - joint_positions
+            ) * GAMMMA + joint_positions
             admittance_controller.set_input(
-                joint_positions, joint_velocities, desired_joint_positions
+                joint_positions, joint_velocities, joint_positions_tilde
             )
             admittance_controller.advance()
             if is_simulation:
@@ -1015,6 +1027,9 @@ def main():
             )
             vectors_collection_server.populate_data(
                 "joints::desired::position", desired_joint_positions
+            )
+            vectors_collection_server.populate_data(
+                "joints::desired::position_tilde", joint_positions_tilde
             )
             vectors_collection_server.populate_data(
                 "joints::desired::current", desired_control_signal
