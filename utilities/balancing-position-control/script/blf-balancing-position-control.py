@@ -305,6 +305,9 @@ class TrajectoryGenerator(ABC):
     def get_output(self) -> Trajectory:
         """Get the output of the trajectory."""
         pass
+    
+    def get_time(self):
+        return self.time.total_seconds()
 
 
 class SplineTrajectoryGenerator(TrajectoryGenerator):
@@ -592,6 +595,9 @@ def main():
     desired_joint_velocities = joint_positions * 0
     joint_velocities = desired_joint_velocities.copy()
 
+    base_acceleration = idyn.Vector6()
+    base_acceleration.zero()
+
     if not kindyn.setRobotState(
         frame_T_link, joint_positions, base_velocity, joint_velocities, gravity
     ):
@@ -645,8 +651,9 @@ def main():
         raise RuntimeError(
             "Unable to set the set point for the joint regularization task"
         )
-    if not ik.tasks["torso_task"].set_set_point(manif.SO3.Identity()):
-        raise RuntimeError("Unable to set the set point for the torso task")
+        
+    # if not ik.tasks["torso_task"].set_set_point(manif.SO3.Identity()):
+    #     raise RuntimeError("Unable to set the set point for the torso task")
 
     desired_joint_positions = joint_positions.copy()
 
@@ -793,6 +800,13 @@ def main():
     )
 
     vectors_collection_server.populate_metadata(
+        "root_link::measured::acceleration", ["x", "y", "z", "omega_x", "omega_y", "omega_z"]
+    )
+    vectors_collection_server.populate_metadata(
+        "root_link::measured::twist", ["x", "y", "z", "omega_x", "omega_y", "omega_z"]
+    )
+
+    vectors_collection_server.populate_metadata(
         "joints::desired::position",
         param_handler.get_group("ROBOT_CONTROL").get_parameter_vector_string(
             "joints_list"
@@ -843,6 +857,10 @@ def main():
             are_joints_ok, joint_velocities, _ = sensor_bridge.get_joint_velocities()
             if not are_joints_ok:
                 raise RuntimeError("Unable to get the joint velocities")
+
+            are_joints_ok, joint_accelerations, _ = sensor_bridge.get_joint_accelerations()
+            if not are_joints_ok:
+                raise RuntimeError("Unable to get the joint accelerations")
 
             if not kindyn.setRobotState(
                 frame_T_link,
@@ -896,9 +914,8 @@ def main():
             right_contact.pose = blf.conversions.to_manif_pose(
                 kindyn_with_measured.getWorldTransform(right_contact_frame)
             )
-            if not global_cop_evaluator.set_input([left_contact, right_contact]):
-                pass
-                # raise RuntimeError("Unable to set the input for the global cop evaluator")
+            # if not global_cop_evaluator.set_input([left_contact, right_contact]):
+            #     raise RuntimeError("Unable to set the input for the global cop evaluator")
             # if not global_cop_evaluator.advance():
             #     raise RuntimeError("Unable to advance the global cop evaluator")
             global_zmp_from_measured = global_cop_evaluator.get_output()
@@ -946,6 +963,18 @@ def main():
                 desired_com_position = com_reference_trajectory.position
 
             # solve the IK
+            #can you vary the yaw of the torso task as a sinusoid
+            f = 0.5
+            A = 0.17 * 3
+            puls = 2*np.pi*f
+            yaw = A * np.sin(puls*trajectory_generator.get_time())
+            torso_rotation = manif.SO3(yaw, 0, 0)
+            dyaw = A * puls * np.cos(puls*trajectory_generator.get_time())
+            torso_vel = manif.SO3Tangent([0, 0, 0])
+
+            if not ik.tasks["torso_task"].set_set_point(torso_rotation, torso_vel):
+                raise RuntimeError("Unable to set the set point for the torso task")
+
             if not ik.tasks["com_task"].set_set_point(
                 desired_com_position, desired_com_velocity
             ):
@@ -999,9 +1028,15 @@ def main():
             com_from_desired = kindyn.getCenterOfMassPosition().toNumPy()
             com_from_measured = kindyn_with_measured.getCenterOfMassPosition().toNumPy()
 
-            root_link_pose = kindyn.getWorldTransform("root_link")
+            root_link_pose = kindyn_with_measured.getWorldTransform("root_link")
             root_link_position = root_link_pose.getPosition().toNumPy()
             root_link_orientation = root_link_pose.getRotation().asRPY().toNumPy()
+
+            root_link_velocity = kindyn_with_measured.getFrameVel("root_link")
+
+            root_link_acceleration = kindyn_with_measured.getFrameAcc("root_link", base_acceleration, joint_accelerations)
+
+
 
             vectors_collection_server.prepare_data()
             vectors_collection_server.clear_data()
@@ -1011,6 +1046,15 @@ def main():
             )
             vectors_collection_server.populate_data(
                 "root_link::measured::orientation", root_link_orientation
+            )
+
+            vectors_collection_server.populate_data(
+                "root_link::measured::twist",
+                root_link_velocity.asVector().toNumPy()
+            )
+
+            vectors_collection_server.populate_data(
+                "root_link::measured::acceleration", root_link_acceleration.toNumPy()
             )
 
             vectors_collection_server.populate_data("zmp::desired_planner", desired_zmp)
