@@ -43,92 +43,60 @@ class WBC:
             kindyn=kindyn, param_handler=param_handler
         )
 
-
-# add a class which implements an admittance controller, with set_input, advance, and get_output methods
-class AdmittanceController:
-    def __init__(
-        self,
-    ):
+class PositionTildeEvaluator:
+    def __init__(self):
         self.is_initialized = False
 
     def initialize(self, param_handler: blf.parameters_handler.IParametersHandler):
-        # Parse the parameters from the parameter handler
-        self.kp_gains = param_handler.get_parameter_vector_float("kp_gains")
-        self.kp_gains_sim = param_handler.get_parameter_vector_float("kp_gains_sim")
-        self.gear_ratio = param_handler.get_parameter_vector_float("gear_ratio")
-        self.ktau = param_handler.get_parameter_vector_float("ktau")
-        self.joint_torque_limits = param_handler.get_parameter_vector_float(
-            "max_torque"
-        )
+        joints_list = param_handler.get_parameter_vector_string("joints_list")
+
+        kp_rigid_group = param_handler.get_group("kp_rigid")
+        kp_sim_group = param_handler.get_group("kp")
+
+        self.kp_gains_sim =[]
+        self.kp_gains = []
+
+        for joint in joints_list:
+            kp_sim = kp_sim_group.get_parameter_float(f"{joint}")
+            kp_rigid = kp_rigid_group.get_parameter_float(f"{joint}")
+
+            if kp_sim is None or kp_rigid is None:
+                raise ValueError(
+                    f"Missing gain for joint '{joint}': "
+                )
+
+            self.kp_gains_sim.append(kp_sim)
+            self.kp_gains.append(kp_rigid)
+
+        self.kp_gains_sim = np.array(self.kp_gains_sim)
+        self.kp_gains = np.array(self.kp_gains)
 
         # Check that vector parameters have the same length
-        vector_lengths = [
-            len(self.kp_gains),
-            len(self.kp_gains_sim),
-            len(self.gear_ratio),
-            len(self.ktau),
-            len(self.joint_torque_limits),
-        ]
-
+        vector_lengths = [len(self.kp_gains_sim), len(self.kp_gains)]
         if len(set(vector_lengths)) != 1:
             raise ValueError(
                 f"Vector parameters have mismatched lengths: "
-                f"kp_gains={len(self.kp_gains)}, "
                 f"kp_gains_sim={len(self.kp_gains_sim)}, "
-                f"ktau={len(self.ktau)}, "
-                f"gear_ratio={self.gear_ratio}, "
-                f"joint_torque_limits={len(self.joint_torque_limits)}"
+                f"kp_gains={len(self.kp_gains)}"
             )
-
-        # convert to numpy arrays
-        self.kp_gains = np.array(self.kp_gains, dtype=np.float64)
-        self.kp_gains_sim = np.array(self.kp_gains_sim, dtype=np.float64)
-        self.gear_ratio = np.array(self.gear_ratio, dtype=np.float64)
-        self.ktau = np.array(self.ktau, dtype=np.float64)
-        self.joint_torque_limits = np.array(self.joint_torque_limits, dtype=np.float64)
-
-        # Check that kp_gains_sim is not zero
-        if np.any(self.kp_gains_sim == 0):
-            raise ValueError(
-                "kp_gains_sim cannot be zero. Please provide non-zero values."
-            )
-
         self.is_initialized = True
 
-        # initialize the input/output
-        self.joints_desired_position = np.zeros(len(self.kp_gains))
-        self.joints_position = np.zeros(len(self.kp_gains))
-        self.joints_torque = np.zeros(len(self.kp_gains))
-        self.motor_current = np.zeros(len(self.kp_gains))
-
-    def set_input(
-        self,
-        joints_position: np.ndarray,
-        joints_desired_position: np.ndarray,
-    ):
-
-        # check is_initialized
-        if not self.is_initialized:
-            raise RuntimeError(
-                "AdmittanceController is not initialized. Call initialize() first."
-            )
+    def get_desired_position_tilde(self, joints_position: np.ndarray, joints_desired_position: np.ndarray) -> np.ndarray:
+        """
+        Compute the desired position tilde, as described in
+        https://github.com/ami-iit/element_sim-2-real-actuatornet/issues/55#issuecomment-2921947297
+        """
 
         # check inputs are all the same size
         if len(joints_position) != len(joints_desired_position):
             raise ValueError("Input arrays must have the same length")
 
         # check that they are the same size as the gains
-        if len(joints_position) != len(self.kp_gains):
+        if len(joints_position) != len(self.kp_gains_sim):
             raise ValueError("Input arrays must have the same length as the gains")
 
         self.joints_position = joints_position
         self.joints_desired_position = joints_desired_position
-
-    def get_desired_position_tilde(self) -> np.ndarray:
-        """
-        Compute the desired position tilde, as described in
-        https://github.com/ami-iit/element_sim-2-real-actuatornet/issues/55#issuecomment-2921947297
-        """
 
         # Compute Gamma
         Gamma = self.kp_gains / self.kp_gains_sim
@@ -136,7 +104,7 @@ class AdmittanceController:
         # check is_initialized
         if not self.is_initialized:
             raise RuntimeError(
-                "AdmittanceController is not initialized. Call initialize() first."
+                "PositionTildeEvaluator is not initialized. Call initialize() first."
             )
 
         # compute the desired position tilde
@@ -144,51 +112,8 @@ class AdmittanceController:
             Gamma * (self.joints_desired_position - self.joints_position)
             + self.joints_position
         )
-
         return desired_position_tilde
 
-    def advance(self):
-
-        # check is_initialized
-        if not self.is_initialized:
-            raise RuntimeError(
-                "AdmittanceController is not initialized. Call initialize() first."
-            )
-
-        # compute control law, according to the trick described in
-        # https://github.com/ami-iit/element_sim-2-real-actuatornet/issues/55#issuecomment-2921947297
-        self.joints_torque = self.kp_gains_sim * (
-            self.get_desired_position_tilde() - self.joints_position
-        )
-
-        # Apply limit to the torque
-        self.joints_torque = np.clip(
-            self.joints_torque,
-            -np.abs(self.joint_torque_limits),
-            np.abs(self.joint_torque_limits),
-        )
-
-        self.motor_current = self.joints_torque / (self.gear_ratio * self.ktau)
-
-    def get_motor_current(self) -> np.ndarray:
-
-        # check is_initialized
-        if not self.is_initialized:
-            raise RuntimeError(
-                "AdmittanceController is not initialized. Call initialize() first."
-            )
-
-        return self.motor_current.copy()
-
-    def get_joint_torque(self) -> np.ndarray:
-
-        # check is_initialized
-        if not self.is_initialized:
-            raise RuntimeError(
-                "AdmittanceController is not initialized. Call initialize() first."
-            )
-
-        return self.joints_torque.copy()
 
 
 def build_remote_control_board_driver(
@@ -628,8 +553,18 @@ def main():
             raise RuntimeError("Unable to initialize the zmp-com controller")
 
     # create and initialize the admittance controller
-    admittance_controller = AdmittanceController()
-    admittance_controller.initialize(param_handler.get_group("ADMITTANCE_CONTROL"))
+    position_to_current_controller = blf.joint_level_controllers.PositionToCurrentController()
+    position_to_current_controller_handler = param_handler.get_group(
+            "POSITION_TO_CURRENT_CONTROLLER"
+        )
+    if not position_to_current_controller.initialize(position_to_current_controller_handler):
+        raise RuntimeError("Unable to initialize the position to current controller")
+    position_tilde_evaluator = PositionTildeEvaluator()
+    position_tilde_evaluator.initialize(
+        param_handler.get_group("POSITION_TO_CURRENT_CONTROLLER")
+    )
+
+
 
     # create and initialize the IK
     ik = WBC(param_handler=param_handler.get_group("IK"), kindyn=kindyn)
@@ -990,20 +925,20 @@ def main():
             )
             desired_joint_velocities = ik.solver.get_output().joint_velocity
 
-            # admittance controller
-            admittance_controller.set_input(
-                joints_position=joint_positions,
-                joints_desired_position=desired_joint_positions,
+            desired_position_tilde = position_tilde_evaluator.get_desired_position_tilde(
+                joint_positions, desired_joint_positions
             )
-            desired_joint_positions_tilde = (
-                admittance_controller.get_desired_position_tilde()
-            )
-            admittance_controller.advance()
-            if is_simulation:
-                desired_control_signal = admittance_controller.get_joint_torque()
-            else:
-                desired_control_signal = admittance_controller.get_motor_current()
 
+            controller_input = blf.joint_level_controllers.PositionToCurrentControllerInput()
+            controller_input.reference_position = desired_position_tilde
+            controller_input.feedback_position = joint_positions
+            controller_input.feedback_velocity = joint_velocities
+
+            # admittance controller
+            position_to_current_controller.set_input(controller_input)
+            
+            position_to_current_controller.advance()
+            
             # # send the joint position
             # if not robot_control.set_references(
             #     desired_joint_positions,
@@ -1014,7 +949,7 @@ def main():
 
             # send the motor current
             if not robot_control.set_references(
-                desired_control_signal,
+                position_to_current_controller.get_output(),
                 control_mode,
                 joint_positions,
             ):
@@ -1095,10 +1030,10 @@ def main():
                 "joints::desired::position", desired_joint_positions
             )
             vectors_collection_server.populate_data(
-                "joints::desired::position_tilde", desired_joint_positions_tilde
+                "joints::desired::position_tilde", desired_position_tilde
             )
             vectors_collection_server.populate_data(
-                "joints::desired::current", desired_control_signal
+                "joints::desired::current", position_to_current_controller.get_output()
             )
 
             vectors_collection_server.send_data()
